@@ -350,6 +350,21 @@ export function Profile() {
             <p className="mt-3 text-sm text-(--color-ink-soft)">No settled bets yet.</p>
           )}
 
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
+              <p className="font-mono text-lg font-semibold text-(--color-ink)">{settledCount}</p>
+              <p className="text-xs text-(--color-ink-soft)">Settled</p>
+            </div>
+            <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
+              <p className="font-mono text-lg font-semibold text-(--color-yes-text)">{wins}</p>
+              <p className="text-xs text-(--color-ink-soft)">Wins</p>
+            </div>
+            <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
+              <p className="font-mono text-lg font-semibold text-(--color-no-text)">{losses}</p>
+              <p className="text-xs text-(--color-ink-soft)">Losses</p>
+            </div>
+          </div>
+
           <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
             Badges
           </h2>
@@ -460,21 +475,6 @@ export function Profile() {
           {colorError && <p className="mt-2 text-sm text-(--color-no-text)">{colorError}</p>}
         </div>
       )}
-
-      <div className="mt-6 grid grid-cols-3 gap-3">
-        <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
-          <p className="font-mono text-lg font-semibold text-(--color-ink)">{settledCount}</p>
-          <p className="text-xs text-(--color-ink-soft)">Settled</p>
-        </div>
-        <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
-          <p className="font-mono text-lg font-semibold text-(--color-yes-text)">{wins}</p>
-          <p className="text-xs text-(--color-ink-soft)">Wins</p>
-        </div>
-        <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
-          <p className="font-mono text-lg font-semibold text-(--color-no-text)">{losses}</p>
-          <p className="text-xs text-(--color-ink-soft)">Losses</p>
-        </div>
-      </div>
 
       {isOwn && notifPermission !== "unsupported" && (
         <>
