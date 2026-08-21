@@ -517,6 +517,7 @@ export async function placeWager(betId: string, userId: string, side: Side, amou
   const user = state.users.find((u) => u.id === userId);
   if (!bet) throw new Error("Bet not found");
   if (!user) throw new Error("User not found");
+  if (bet.subjectUserId === userId) throw new Error("You can't wager on a bet you're the subject of");
   if (effectiveStatus(bet) !== "open") throw new Error("Bet is no longer accepting wagers");
   if (!Number.isInteger(amount) || amount < MIN_WAGER) {
     throw new Error(`Wagers must be a whole number of at least ${MIN_WAGER} tokens`);

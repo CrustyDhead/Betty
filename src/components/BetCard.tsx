@@ -44,6 +44,16 @@ export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: strin
         </div>
         {status === "open" ? (
           <Countdown lockTime={bet.lockTime} />
+        ) : status === "resolved" ? (
+          <span
+            className={`inline-flex items-center rounded-full px-2.5 py-1 font-mono text-xs font-semibold uppercase ${
+              bet.outcome === "yes"
+                ? "bg-(--color-yes-soft) text-(--color-yes-text)"
+                : "bg-(--color-no-soft) text-(--color-no-text)"
+            }`}
+          >
+            {bet.outcome} won
+          </span>
         ) : (
           <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 font-mono text-xs font-medium text-(--color-ink-soft)">
             {STATUS_LABEL[status]}

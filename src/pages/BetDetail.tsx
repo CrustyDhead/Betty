@@ -216,8 +216,18 @@ export function BetDetail() {
         </div>
 
         {status === "resolved" && (
-          <div className="mt-4 rounded-xl bg-(--color-yes-soft) px-4 py-3 text-sm font-medium text-(--color-ink)">
-            Resolved: <span className="uppercase text-(--color-yes-text)">{bet.outcome}</span> won
+          <div
+            className={`mt-4 rounded-xl px-4 py-3 text-sm font-medium text-(--color-ink) ${
+              bet.outcome === "yes" ? "bg-(--color-yes-soft)" : "bg-(--color-no-soft)"
+            }`}
+          >
+            Resolved:{" "}
+            <span
+              className={`uppercase ${bet.outcome === "yes" ? "text-(--color-yes-text)" : "text-(--color-no-text)"}`}
+            >
+              {bet.outcome}
+            </span>{" "}
+            won
           </div>
         )}
         {status === "void" && (
@@ -260,7 +270,13 @@ export function BetDetail() {
           </div>
         )}
 
-        {status === "open" && user && (
+        {status === "open" && user && user.id === bet.subjectUserId && (
+          <p className="mt-6 border-t border-black/5 pt-5 text-sm text-(--color-ink-soft)">
+            You're the subject of this bet, so you can't wager on it.
+          </p>
+        )}
+
+        {status === "open" && user && user.id !== bet.subjectUserId && (
           <form onSubmit={submitWager} className="mt-6 border-t border-black/5 pt-5">
             <div className="flex gap-2">
               <button

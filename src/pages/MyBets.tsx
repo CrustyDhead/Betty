@@ -61,7 +61,17 @@ export function MyBets() {
               >
                 <div>
                   <p className="text-sm font-medium text-(--color-ink)">{bet.title}</p>
-                  <p className="mt-0.5 text-xs capitalize text-(--color-ink-soft)">{status}</p>
+                  <p
+                    className={`mt-0.5 text-xs capitalize ${
+                      status === "resolved"
+                        ? bet.outcome === "yes"
+                          ? "font-medium uppercase text-(--color-yes-text)"
+                          : "font-medium uppercase text-(--color-no-text)"
+                        : "text-(--color-ink-soft)"
+                    }`}
+                  >
+                    {status === "resolved" ? `${bet.outcome} won` : status}
+                  </p>
                 </div>
                 <div className="text-right">
                   <p
