@@ -32,6 +32,7 @@ export function BetDetail() {
   const [commentText, setCommentText] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [resolvingEarly, setResolvingEarly] = useState(false);
 
   const bet = state.bets.find((b) => b.id === id);
   if (!bet) {
@@ -173,7 +174,7 @@ export function BetDetail() {
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            {subjectName && <Avatar name={subjectName} size="md" />}
+            {subjectName && <Avatar name={subjectName} emoji={subject?.avatarEmoji} size="md" />}
             <div>
               <h1 className="font-display text-xl font-semibold leading-snug text-(--color-ink)">
                 {bet.title}
@@ -339,6 +340,45 @@ export function BetDetail() {
           </form>
         )}
 
+        {status === "open" && user && (
+          <div className="mt-4 border-t border-black/5 pt-4">
+            {resolvingEarly ? (
+              <div>
+                <p className="text-sm font-medium text-(--color-ink)">
+                  Resolve now? This ends betting immediately, even though the timer hasn't run out.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => handleResolve("yes")}
+                    className="flex-1 rounded-xl bg-(--color-yes-soft) py-3 font-display text-sm font-semibold text-(--color-yes-text) transition hover:opacity-80"
+                  >
+                    Resolve YES
+                  </button>
+                  <button
+                    onClick={() => handleResolve("no")}
+                    className="flex-1 rounded-xl bg-(--color-no-soft) py-3 font-display text-sm font-semibold text-(--color-no-text) transition hover:opacity-80"
+                  >
+                    Resolve NO
+                  </button>
+                </div>
+                <button
+                  onClick={() => setResolvingEarly(false)}
+                  className="mt-2 text-xs font-medium text-(--color-ink-soft) hover:text-(--color-ink)"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setResolvingEarly(true)}
+                className="text-xs font-medium text-(--color-ink-soft) underline decoration-dotted hover:text-(--color-ink)"
+              >
+                Already know the outcome? Resolve early
+              </button>
+            )}
+          </div>
+        )}
+
         {status === "locked" && user && (
           <div className="mt-6 border-t border-black/5 pt-5">
             <p className="text-sm font-medium text-(--color-ink)">
@@ -389,7 +429,7 @@ export function BetDetail() {
               <div key={w.id} className="rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
-                    <Avatar name={bettor?.name ?? "?"} />
+                    <Avatar name={bettor?.name ?? "?"} emoji={bettor?.avatarEmoji} />
                     <span className="text-sm font-medium text-(--color-ink)">{bettor?.name}</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -430,7 +470,7 @@ export function BetDetail() {
                 key={c.id}
                 className="flex items-start gap-2.5 rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5"
               >
-                <Avatar name={author?.name ?? "?"} />
+                <Avatar name={author?.name ?? "?"} emoji={author?.avatarEmoji} />
                 <div>
                   <p className="text-sm text-(--color-ink)">
                     <span className="font-medium">{author?.name}</span> {c.text}

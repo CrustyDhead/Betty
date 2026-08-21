@@ -1,10 +1,14 @@
-import { currentStreak, logout, userWinStats } from "../lib/store";
+import { useState } from "react";
+import { currentStreak, logout, setAvatarEmoji, userWinStats } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { Avatar } from "../components/Avatar";
+import { AVATAR_EMOJI_OPTIONS } from "../lib/avatars";
 
 export function Profile() {
   const user = useCurrentUser();
   useStoreState();
+  const [savingEmoji, setSavingEmoji] = useState<string | null>(null);
+  const [emojiError, setEmojiError] = useState<string | null>(null);
 
   if (!user) return null;
 
@@ -23,12 +27,25 @@ export function Profile() {
     badges.push({ label: "Whale — 2,000+ tokens", emoji: "🐋" });
   }
 
+  async function handlePickEmoji(emoji: string | null) {
+    if (!user) return;
+    setSavingEmoji(emoji ?? "__reset__");
+    setEmojiError(null);
+    try {
+      await setAvatarEmoji(user.id, emoji);
+    } catch (err) {
+      setEmojiError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSavingEmoji(null);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <h1 className="font-display text-xl font-semibold text-(--color-ink)">Profile</h1>
 
       <div className="mt-5 flex items-center gap-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
-        <Avatar name={user.name} size="md" />
+        <Avatar name={user.name} emoji={user.avatarEmoji} size="md" />
         <div>
           <p className="font-display text-lg font-semibold text-(--color-ink)">{user.name}</p>
           <p className="font-mono text-sm text-(--color-ink-soft)">
@@ -36,6 +53,39 @@ export function Profile() {
           </p>
         </div>
       </div>
+
+      <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+        Avatar
+      </h2>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          onClick={() => handlePickEmoji(null)}
+          disabled={savingEmoji !== null}
+          className={`flex h-9 w-9 items-center justify-center rounded-full border text-sm font-semibold transition disabled:opacity-50 ${
+            !user.avatarEmoji
+              ? "border-(--color-ink) bg-(--color-ink) text-white"
+              : "border-black/10 bg-(--color-surface) text-(--color-ink-soft) hover:text-(--color-ink)"
+          }`}
+          title="Use initial instead"
+        >
+          {user.name.trim().charAt(0).toUpperCase() || "?"}
+        </button>
+        {AVATAR_EMOJI_OPTIONS.map((emoji) => (
+          <button
+            key={emoji}
+            onClick={() => handlePickEmoji(emoji)}
+            disabled={savingEmoji !== null}
+            className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition disabled:opacity-50 ${
+              user.avatarEmoji === emoji
+                ? "border-(--color-ink) bg-(--color-ink)"
+                : "border-black/10 bg-(--color-surface) hover:border-black/20"
+            }`}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+      {emojiError && <p className="mt-2 text-sm text-(--color-no-text)">{emojiError}</p>}
 
       <div className="mt-4 grid grid-cols-3 gap-3">
         <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">

@@ -29,7 +29,7 @@ export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: strin
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          {subjectName && <Avatar name={subjectName} />}
+          {subjectName && <Avatar name={subjectName} emoji={subject?.avatarEmoji} />}
           <div>
             <h3 className="font-display text-base font-semibold leading-snug text-(--color-ink)">
               {bet.title}

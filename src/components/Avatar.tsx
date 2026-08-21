@@ -1,13 +1,22 @@
-export function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "md" }) {
+export function Avatar({
+  name,
+  emoji,
+  size = "sm",
+}: {
+  name: string;
+  emoji?: string | null;
+  size?: "sm" | "md";
+}) {
   const initial = name.trim().charAt(0).toUpperCase() || "?";
-  const dims = size === "md" ? "h-9 w-9 text-sm" : "h-7 w-7 text-xs";
+  const dims = size === "md" ? "h-9 w-9" : "h-7 w-7";
+  const textSize = size === "md" ? (emoji ? "text-lg" : "text-sm") : emoji ? "text-sm" : "text-xs";
 
   return (
     <div
-      className={`flex ${dims} shrink-0 items-center justify-center rounded-full bg-(--color-ink) font-display font-semibold text-white`}
+      className={`flex ${dims} ${textSize} shrink-0 items-center justify-center rounded-full bg-(--color-ink) font-display font-semibold text-white`}
       title={name}
     >
-      {initial}
+      {emoji || initial}
     </div>
   );
 }

@@ -76,7 +76,12 @@ function requireClient() {
 type Row = Record<string, any>;
 
 function mapUser(row: Row): User {
-  return { id: row.id, name: row.name, tokenBalance: Number(row.token_balance) };
+  return {
+    id: row.id,
+    name: row.name,
+    tokenBalance: Number(row.token_balance),
+    avatarEmoji: row.avatar_emoji ?? null,
+  };
 }
 function mapBet(row: Row): Bet {
   return {
@@ -295,6 +300,18 @@ async function applyWeeklyStipendIfDue(user: User, lastStipendAt: string | null)
 
 export function clearStipendAlert() {
   setState({ stipendAlert: null });
+}
+
+export async function setAvatarEmoji(userId: string, emoji: string | null) {
+  const client = requireClient();
+  const { data, error } = await client
+    .from("users")
+    .update({ avatar_emoji: emoji })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  setState({ users: upsertById(state.users, mapUser(data)) });
 }
 
 // ---- Derived helpers ----
