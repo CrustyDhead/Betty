@@ -41,7 +41,7 @@ export function NavBar() {
         {user && (
           <div className="flex items-center gap-2 sm:gap-3">
             <span className="font-mono text-sm font-semibold text-(--color-ink)">
-              {user.tokenBalance.toLocaleString()}
+              {Math.round(user.tokenBalance).toLocaleString()}
             </span>
             <NavLink
               to="/profile"

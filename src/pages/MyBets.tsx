@@ -25,7 +25,7 @@ export function MyBets() {
         <div className="flex-1 rounded-2xl bg-(--color-surface) p-4 shadow-sm shadow-black/5">
           <p className="text-xs text-(--color-ink-soft)">Balance</p>
           <p className="mt-1 font-mono text-lg font-semibold text-(--color-ink)">
-            {user.tokenBalance.toLocaleString()}
+            {Math.round(user.tokenBalance).toLocaleString()}
           </p>
         </div>
         <div className="flex-1 rounded-2xl bg-(--color-surface) p-4 shadow-sm shadow-black/5">

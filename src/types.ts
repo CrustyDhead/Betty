@@ -52,5 +52,10 @@ export interface Transaction {
   userId: string;
   type: TransactionType;
   amount: number;
+  // Which bet this relates to, for wager/payout/refund — null for
+  // stipend/transfer, which aren't tied to a specific bet.
+  betId: string | null;
+  // The other party in a transfer — null for every other type.
+  counterpartyUserId: string | null;
   timestamp: string;
 }

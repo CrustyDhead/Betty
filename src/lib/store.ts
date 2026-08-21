@@ -111,7 +111,15 @@ function mapWager(row: Row): Wager {
   };
 }
 function mapTransaction(row: Row): Transaction {
-  return { id: row.id, userId: row.user_id, type: row.type, amount: Number(row.amount), timestamp: row.timestamp };
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    amount: Number(row.amount),
+    betId: row.bet_id ?? null,
+    counterpartyUserId: row.counterparty_user_id ?? null,
+    timestamp: row.timestamp,
+  };
 }
 function mapComment(row: Row): Comment {
   return { id: row.id, betId: row.bet_id, userId: row.user_id, text: row.text, timestamp: row.created_at };
@@ -374,6 +382,22 @@ export async function setAvatarColor(userId: string, color: string | null) {
   setState({ users: upsertById(state.users, mapUser(data)) });
 }
 
+export async function renameUser(userId: string, newName: string) {
+  const trimmed = newName.trim();
+  if (!trimmed) throw new Error("Enter a name");
+
+  const client = requireClient();
+  const { data, error } = await client.from("users").update({ name: trimmed }).eq("id", userId).select().single();
+  if (error) {
+    // 23505 = unique_violation — users.name has a UNIQUE constraint, so
+    // this is the authoritative check rather than a race-prone
+    // client-side pre-check against possibly-stale cached user list.
+    if (error.code === "23505") throw new Error("That name is already taken");
+    throw new Error(error.message);
+  }
+  setState({ users: upsertById(state.users, mapUser(data)) });
+}
+
 // ---- Peer-to-peer transfers ----
 // A direct gift/side-payment separate from betting — e.g. spotting a
 // teammate some tokens, or settling something outside the formal pot-split
@@ -430,8 +454,8 @@ export async function transferTokens(fromUserId: string, toUserId: string, amoun
   }
 
   await client.from("transactions").insert([
-    { user_id: fromUserId, type: "transfer", amount: -amount },
-    { user_id: toUserId, type: "transfer", amount },
+    { user_id: fromUserId, type: "transfer", amount: -amount, counterparty_user_id: toUserId },
+    { user_id: toUserId, type: "transfer", amount, counterparty_user_id: fromUserId },
   ]);
 }
 
@@ -517,7 +541,7 @@ export async function placeWager(betId: string, userId: string, side: Side, amou
     .single();
   if (userErr) throw new Error(userErr.message);
 
-  await client.from("transactions").insert({ user_id: userId, type: "wager", amount: -amount });
+  await client.from("transactions").insert({ user_id: userId, type: "wager", amount: -amount, bet_id: betId });
 
   const wager = mapWager(wagerRow);
   setState({ wagers: upsertById(state.wagers, wager), users: upsertById(state.users, mapUser(userRow)) });
@@ -561,7 +585,9 @@ export async function resolveBet(betId: string, outcome: Side): Promise<void> {
           .single();
         if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
       }
-      await client.from("transactions").insert({ user_id: w.userId, type: "payout", amount: payout });
+      await client
+        .from("transactions")
+        .insert({ user_id: w.userId, type: "payout", amount: payout, bet_id: betId });
     }
   }
 
@@ -601,7 +627,9 @@ export async function voidBet(betId: string): Promise<void> {
         .single();
       if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
     }
-    await client.from("transactions").insert({ user_id: w.userId, type: "refund", amount: w.amount });
+    await client
+      .from("transactions")
+      .insert({ user_id: w.userId, type: "refund", amount: w.amount, bet_id: betId });
   }
 
   const { data: betRow, error: betErr } = await client
@@ -640,7 +668,9 @@ export async function deleteBet(betId: string, requestingUserId: string): Promis
         .single();
       if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
     }
-    await client.from("transactions").insert({ user_id: w.userId, type: "refund", amount: w.amount });
+    await client
+      .from("transactions")
+      .insert({ user_id: w.userId, type: "refund", amount: w.amount, bet_id: betId });
   }
 
   const { error: deleteErr } = await client.from("bets").delete().eq("id", betId);
@@ -705,7 +735,9 @@ export async function reResolve(betId: string, outcome: Side) {
         .single();
       if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
     }
-    await client.from("transactions").insert({ user_id: w.userId, type: "refund", amount: -w.payout });
+    await client
+      .from("transactions")
+      .insert({ user_id: w.userId, type: "refund", amount: -w.payout, bet_id: betId });
 
     const { data: wagerRow, error: wagerErr } = await client
       .from("wagers")
@@ -759,6 +791,12 @@ export function userWinStats(userId: string) {
   const resolved = resolvedWagersForUser(userId);
   const wins = resolved.filter((r) => r.wager.payout! > r.wager.amount).length;
   return { settledCount: resolved.length, wins, losses: resolved.length - wins };
+}
+
+export function userTransactions(userId: string) {
+  return state.transactions
+    .filter((t) => t.userId === userId)
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 }
 
 export function currentStreak(userId: string): StreakInfo {

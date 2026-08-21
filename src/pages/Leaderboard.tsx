@@ -44,7 +44,7 @@ export function Leaderboard() {
               </p>
             </div>
             <span className="font-mono text-sm font-semibold text-(--color-ink)">
-              {row.user.tokenBalance.toLocaleString()}
+              {Math.round(row.user.tokenBalance).toLocaleString()}
             </span>
           </div>
         ))}
