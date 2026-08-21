@@ -289,12 +289,47 @@ export function BetDetail() {
                 Wager
               </button>
             </div>
-            {Number(amount) > 0 && (
-              <p className="mt-2 text-xs text-(--color-ink-soft)">
-                You're risking <span className="font-mono font-medium text-(--color-no-text)">{amount}</span>{" "}
-                tokens — gone for good if {side === "yes" ? "NO" : "YES"} wins.
-              </p>
-            )}
+            {Number(amount) > 0 &&
+              (() => {
+                const amt = Number(amount);
+                const currentSideTotal = side === "yes" ? yes : no;
+                const otherSideTotal = side === "yes" ? no : yes;
+                const otherSide = side === "yes" ? "NO" : "YES";
+                const existingOnSide = position && position.side === side ? position.amount : 0;
+                const yourStakeOnSide = existingOnSide + amt;
+                const newSideTotal = currentSideTotal + amt;
+
+                const potentialPayout =
+                  otherSideTotal > 0
+                    ? yourStakeOnSide + (yourStakeOnSide / newSideTotal) * otherSideTotal
+                    : null;
+                const profit = potentialPayout !== null ? potentialPayout - yourStakeOnSide : null;
+
+                return (
+                  <div className="mt-2 space-y-1 text-xs text-(--color-ink-soft)">
+                    <p>
+                      You're risking{" "}
+                      <span className="font-mono font-medium text-(--color-no-text)">{amt}</span> tokens —
+                      gone for good if {otherSide} wins.
+                    </p>
+                    {potentialPayout !== null ? (
+                      <p>
+                        If {side.toUpperCase()} wins: you'd get back{" "}
+                        <span className="font-mono font-medium text-(--color-yes-text)">
+                          {Math.round(potentialPayout)}
+                        </span>{" "}
+                        tokens (+{Math.round(profit!)} profit) at today's odds — this shifts as more
+                        people bet.
+                      </p>
+                    ) : (
+                      <p>
+                        No one's on {otherSide} yet — if it stays that way, this voids and just refunds
+                        your stake instead of paying out.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             {position && (
               <p className="mt-2 text-xs text-(--color-ink-soft)">
                 You already have {position.amount} tokens on {position.side.toUpperCase()} — this adds
