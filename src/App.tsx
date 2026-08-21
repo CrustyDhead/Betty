@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { useCurrentUser } from "./lib/useStore";
+import { initStore } from "./lib/store";
+import { useCurrentUser, useStoreState } from "./lib/useStore";
 import { NavBar } from "./components/NavBar";
 import { Login } from "./pages/Login";
 import { Feed } from "./pages/Feed";
@@ -10,7 +12,30 @@ import { Leaderboard } from "./pages/Leaderboard";
 import { Profile } from "./pages/Profile";
 
 export default function App() {
+  const state = useStoreState();
   const user = useCurrentUser();
+
+  useEffect(() => {
+    initStore();
+  }, []);
+
+  if (state.error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <p className="max-w-sm text-center text-sm text-(--color-no)">
+          Couldn't reach the backend: {state.error}
+        </p>
+      </div>
+    );
+  }
+
+  if (state.loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="font-display text-sm text-(--color-ink-soft)">Loading…</p>
+      </div>
+    );
+  }
 
   if (!user) return <Login />;
 

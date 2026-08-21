@@ -6,9 +6,12 @@ import { CATEGORIES, CATEGORY_EMOJI } from "../lib/categories";
 import type { BetCategory } from "../types";
 
 function defaultLockTime() {
+  // datetime-local inputs read/write local wall-clock time, not UTC — build
+  // the string from local components so it round-trips through new Date()
+  // to the same instant regardless of timezone.
   const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
-  d.setSeconds(0, 0);
-  return d.toISOString().slice(0, 16);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function CreateBet() {
@@ -23,7 +26,7 @@ export function CreateBet() {
   const [lockTime, setLockTime] = useState(defaultLockTime());
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!user) return;
     if (!title.trim()) {
@@ -35,15 +38,20 @@ export function CreateBet() {
       setError("Lock time must be in the future");
       return;
     }
-    const bet = createBet({
-      title: title.trim(),
-      description: description.trim(),
-      subjectUserId: subjectUserId || null,
-      creatorId: user.id,
-      lockTime: lockDate.toISOString(),
-      category,
-    });
-    navigate(`/bets/${bet.id}`);
+    setError(null);
+    try {
+      const bet = await createBet({
+        title: title.trim(),
+        description: description.trim(),
+        subjectUserId: subjectUserId || null,
+        creatorId: user.id,
+        lockTime: lockDate.toISOString(),
+        category,
+      });
+      navigate(`/bets/${bet.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    }
   }
 
   return (

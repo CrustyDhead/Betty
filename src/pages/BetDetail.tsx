@@ -47,7 +47,7 @@ export function BetDetail() {
   const creator = state.users.find((u) => u.id === bet.creatorId);
   const position = user ? userPosition(bet.id, user.id) : null;
 
-  function submitWager(e: FormEvent) {
+  async function submitWager(e: FormEvent) {
     e.preventDefault();
     setError(null);
     if (!user) return;
@@ -57,26 +57,47 @@ export function BetDetail() {
       return;
     }
     try {
-      placeWager(bet!.id, user.id, side, amt);
+      await placeWager(bet!.id, user.id, side, amt);
       setAmount("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     }
   }
 
-  function handleResolve(outcome: Side) {
-    resolveBet(bet!.id, outcome);
+  async function handleResolve(outcome: Side) {
+    try {
+      await resolveBet(bet!.id, outcome);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    }
   }
 
-  function handleReResolve(outcome: Side) {
-    reResolve(bet!.id, outcome);
+  async function handleReResolve(outcome: Side) {
+    try {
+      await reResolve(bet!.id, outcome);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    }
   }
 
-  function submitComment(e: FormEvent) {
+  async function handleFlagDispute() {
+    try {
+      await flagDispute(bet!.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    }
+  }
+
+  async function submitComment(e: FormEvent) {
     e.preventDefault();
     if (!user || !commentText.trim()) return;
-    addComment(bet!.id, user.id, commentText);
+    const text = commentText;
     setCommentText("");
+    try {
+      await addComment(bet!.id, user.id, text);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    }
   }
 
   const comments = state.comments
@@ -137,7 +158,7 @@ export function BetDetail() {
 
         {(status === "resolved" || status === "void") && user && !bet.disputed && (
           <button
-            onClick={() => flagDispute(bet!.id)}
+            onClick={() => handleFlagDispute()}
             className="mt-3 text-xs font-medium text-(--color-ink-soft) underline decoration-dotted hover:text-(--color-no)"
           >
             Something's off — flag this resolution

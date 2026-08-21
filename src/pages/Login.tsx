@@ -7,8 +7,9 @@ export function Login() {
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
       setError("Enter a name");
@@ -18,7 +19,15 @@ export function Login() {
       setError("Wrong team PIN");
       return;
     }
-    login(name);
+    setError(null);
+    setSubmitting(true);
+    try {
+      await login(name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -59,9 +68,10 @@ export function Login() {
 
         <button
           type="submit"
-          className="mt-6 w-full rounded-xl bg-(--color-ink) py-2.5 font-display text-sm font-semibold text-white transition hover:opacity-90"
+          disabled={submitting}
+          className="mt-6 w-full rounded-xl bg-(--color-ink) py-2.5 font-display text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
         >
-          Enter
+          {submitting ? "Entering…" : "Enter"}
         </button>
 
         <p className="mt-4 text-xs text-(--color-ink-soft)">
