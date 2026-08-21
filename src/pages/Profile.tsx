@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import {
   currentStreak,
   logout,
@@ -6,6 +6,7 @@ import {
   requestNotificationPermission,
   setAvatarColor,
   setAvatarEmoji,
+  transferTokens,
   userWinStats,
 } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
@@ -14,12 +15,17 @@ import { AVATAR_COLOR_OPTIONS, AVATAR_EMOJI_OPTIONS, DEFAULT_AVATAR_COLOR } from
 
 export function Profile() {
   const user = useCurrentUser();
-  useStoreState();
+  const state = useStoreState();
   const [savingEmoji, setSavingEmoji] = useState<string | null>(null);
   const [emojiError, setEmojiError] = useState<string | null>(null);
   const [savingColor, setSavingColor] = useState<string | null>(null);
   const [colorError, setColorError] = useState<string | null>(null);
   const [notifPermission, setNotifPermission] = useState(notificationPermission());
+  const [transferTo, setTransferTo] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferSuccess, setTransferSuccess] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
 
   async function handleEnableNotifications() {
     setNotifPermission(await requestNotificationPermission());
@@ -68,6 +74,34 @@ export function Profile() {
     }
   }
 
+  async function handleTransfer(e: FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    setTransferError(null);
+    setTransferSuccess(null);
+    const amt = Number(transferAmount);
+    if (!transferTo) {
+      setTransferError("Pick who you're sending to");
+      return;
+    }
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setTransferError("Enter a positive amount");
+      return;
+    }
+    setSending(true);
+    try {
+      await transferTokens(user.id, transferTo, amt);
+      const recipientName = state.users.find((u) => u.id === transferTo)?.name ?? "them";
+      setTransferSuccess(`Sent ${amt} tokens to ${recipientName}.`);
+      setTransferAmount("");
+      setTransferTo("");
+    } catch (err) {
+      setTransferError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <h1 className="font-display text-xl font-semibold text-(--color-ink)">Profile</h1>
@@ -81,6 +115,52 @@ export function Profile() {
           </p>
         </div>
       </div>
+
+      <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+        Send tokens
+      </h2>
+      {state.users.filter((u) => u.id !== user.id).length === 0 ? (
+        <p className="mt-3 text-sm text-(--color-ink-soft)">No one else has joined yet.</p>
+      ) : (
+        <form
+          onSubmit={handleTransfer}
+          className="mt-3 rounded-2xl bg-(--color-surface) p-4 shadow-sm shadow-black/5"
+        >
+          <div className="flex gap-2">
+            <select
+              value={transferTo}
+              onChange={(e) => setTransferTo(e.target.value)}
+              className="flex-1 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
+            >
+              <option value="">Who to?</option>
+              {state.users
+                .filter((u) => u.id !== user.id)
+                .map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+            </select>
+            <input
+              value={transferAmount}
+              onChange={(e) => setTransferAmount(e.target.value)}
+              type="number"
+              inputMode="numeric"
+              placeholder="Amount"
+              className="w-28 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 font-mono text-sm outline-none focus:border-(--color-yes-text)"
+            />
+            <button
+              type="submit"
+              disabled={sending}
+              className="rounded-xl bg-(--color-ink) px-4 py-2.5 font-display text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+            >
+              {sending ? "…" : "Send"}
+            </button>
+          </div>
+          {transferError && <p className="mt-2 text-sm text-(--color-no-text)">{transferError}</p>}
+          {transferSuccess && <p className="mt-2 text-sm text-(--color-yes-text)">{transferSuccess}</p>}
+        </form>
+      )}
 
       <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
         Avatar

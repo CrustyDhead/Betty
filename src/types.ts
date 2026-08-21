@@ -45,7 +45,7 @@ export interface Wager {
   payout: number | null;
 }
 
-export type TransactionType = "stipend" | "wager" | "payout" | "refund";
+export type TransactionType = "stipend" | "wager" | "payout" | "refund" | "transfer";
 
 export interface Transaction {
   id: string;

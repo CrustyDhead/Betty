@@ -374,6 +374,48 @@ export async function setAvatarColor(userId: string, color: string | null) {
   setState({ users: upsertById(state.users, mapUser(data)) });
 }
 
+// ---- Peer-to-peer transfers ----
+// A direct gift/side-payment separate from betting — e.g. spotting a
+// teammate some tokens, or settling something outside the formal pot-split
+// flow. No real money involved anywhere in this app, so this carries the
+// same "zero real stakes" trust level as everything else here.
+
+export async function transferTokens(fromUserId: string, toUserId: string, amount: number) {
+  if (fromUserId === toUserId) throw new Error("Can't send tokens to yourself");
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a positive amount");
+
+  const sender = state.users.find((u) => u.id === fromUserId);
+  const receiver = state.users.find((u) => u.id === toUserId);
+  if (!sender) throw new Error("Sender not found");
+  if (!receiver) throw new Error("Recipient not found");
+  if (amount > sender.tokenBalance) throw new Error("Insufficient balance");
+
+  const client = requireClient();
+
+  const { data: senderRow, error: senderErr } = await client
+    .from("users")
+    .update({ token_balance: sender.tokenBalance - amount })
+    .eq("id", fromUserId)
+    .select()
+    .single();
+  if (senderErr) throw new Error(senderErr.message);
+  setState({ users: upsertById(state.users, mapUser(senderRow)) });
+
+  const { data: receiverRow, error: receiverErr } = await client
+    .from("users")
+    .update({ token_balance: receiver.tokenBalance + amount })
+    .eq("id", toUserId)
+    .select()
+    .single();
+  if (receiverErr) throw new Error(receiverErr.message);
+  setState({ users: upsertById(state.users, mapUser(receiverRow)) });
+
+  await client.from("transactions").insert([
+    { user_id: fromUserId, type: "transfer", amount: -amount },
+    { user_id: toUserId, type: "transfer", amount },
+  ]);
+}
+
 // ---- Derived helpers ----
 
 export function effectiveStatus(bet: Bet): BetStatus {
