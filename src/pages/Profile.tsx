@@ -1,9 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
 import {
+  ENGAGEMENT_TIERS,
+  LAUNCH_DATE,
+  WEEKLY_STIPEND,
   currentStreak,
   logout,
   notificationPermission,
+  projectedStipend,
   renameUser,
   requestNotificationPermission,
   setAvatarColor,
@@ -24,6 +28,17 @@ const TRANSACTION_LABEL: Record<TransactionType, { emoji: string; label: string 
   refund: { emoji: "↩️", label: "Refund" },
   transfer: { emoji: "🔄", label: "Transfer" },
 };
+
+const TIER_EMOJI: Record<string, string> = {
+  quiet: "💤",
+  steady: "💰",
+  active: "✨",
+  on_fire: "🔥",
+};
+
+function formatDate(ms: number) {
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 function formatTimestamp(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
@@ -77,6 +92,7 @@ export function Profile() {
   const winRate = settledCount > 0 ? Math.round((wins / settledCount) * 100) : null;
   const streak = currentStreak(viewedUser.id);
   const transactions = userTransactions(viewedUser.id);
+  const stipend = projectedStipend(viewedUser.id);
 
   const badges: { label: string; emoji: string }[] = [];
   if (streak.kind === "win" && streak.streak >= 2) {
@@ -228,9 +244,62 @@ export function Profile() {
 
       {effectiveTab === "token" && (
         <div className="mt-5">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+            Weekly stipend
+          </h2>
+          <div className="mt-3 rounded-2xl bg-(--color-surface) p-4 shadow-sm shadow-black/5">
+            {stipend.kind === "flat" ? (
+              <>
+                <p className="text-sm font-medium text-(--color-ink)">
+                  🎉 First-week bonus — flat {WEEKLY_STIPEND} tokens for everyone through{" "}
+                  {formatDate(LAUNCH_DATE + 7 * 24 * 60 * 60 * 1000)}
+                </p>
+                <p className="mt-1.5 text-xs text-(--color-ink-soft)">
+                  After that, the weekly stipend scales with how many wagers{" "}
+                  {isOwn ? "you place" : `${viewedUser.name} places`} in the past 7 days — more action, bigger
+                  top-up.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-(--color-ink)">
+                      {TIER_EMOJI[stipend.kind]} {stipend.tier?.label}
+                    </p>
+                    <p className="text-xs text-(--color-ink-soft)">
+                      {stipend.wagerCount} wager{stipend.wagerCount === 1 ? "" : "s"} in the last 7 days
+                    </p>
+                  </div>
+                  <p className="text-right font-mono text-lg font-semibold text-(--color-ink)">
+                    +{stipend.amount}
+                    <span className="block text-xs font-normal text-(--color-ink-soft)">next week</span>
+                  </p>
+                </div>
+                <div className="mt-3 space-y-1">
+                  {ENGAGEMENT_TIERS.map((t) => (
+                    <div
+                      key={t.kind}
+                      className={`flex items-center justify-between rounded-lg px-2 py-1 text-xs ${
+                        t.kind === stipend.tier?.kind
+                          ? "bg-(--color-yes-soft) font-medium text-(--color-yes-text)"
+                          : "text-(--color-ink-soft)"
+                      }`}
+                    >
+                      <span>
+                        {t.label} ({t.minWagers}+ wager{t.minWagers === 1 ? "" : "s"})
+                      </span>
+                      <span className="font-mono">{t.amount}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
           {isOwn && (
             <>
-              <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+              <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
                 Send tokens
               </h2>
               {state.users.filter((u) => u.id !== currentUser.id).length === 0 ? (

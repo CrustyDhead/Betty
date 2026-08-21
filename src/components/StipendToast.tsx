@@ -3,9 +3,11 @@ import { clearStipendAlert } from "../lib/store";
 import { useStoreState } from "../lib/useStore";
 
 const COPY = {
-  normal: { emoji: "💰", label: "Weekly stipend" },
-  boosted: { emoji: "✨", label: "Boosted stipend!" },
-  jackpot: { emoji: "🎉", label: "JACKPOT stipend!!" },
+  flat: { emoji: "💰", label: "Weekly stipend" },
+  quiet: { emoji: "💤", label: "Quiet-week stipend" },
+  steady: { emoji: "💰", label: "Weekly stipend" },
+  active: { emoji: "✨", label: "Active-week stipend!" },
+  on_fire: { emoji: "🔥", label: "On-fire stipend!!" },
 };
 
 export function StipendToast() {

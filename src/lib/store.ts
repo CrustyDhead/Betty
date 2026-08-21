@@ -21,9 +21,31 @@ export const WEEKLY_STIPEND = 100;
 export const MIN_WAGER = 10;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
+// Everyone's stipend is flat for the app's first week live, so nobody's
+// early impression of the game is "why did I get less than them" before
+// there's been any real activity to base it on. After that, it scales with
+// how many wagers you placed in the trailing 7 days — reads as "play more,
+// earn more" instead of pure luck.
+export const LAUNCH_DATE = new Date("2026-08-21T00:00:00Z").getTime();
+
+export interface EngagementTier {
+  kind: "quiet" | "steady" | "active" | "on_fire";
+  label: string;
+  minWagers: number;
+  amount: number;
+}
+
+// Ordered lowest-engagement first.
+export const ENGAGEMENT_TIERS: EngagementTier[] = [
+  { kind: "quiet", label: "Quiet week", minWagers: 0, amount: 50 },
+  { kind: "steady", label: "Steady", minWagers: 1, amount: 100 },
+  { kind: "active", label: "Active", minWagers: 3, amount: 150 },
+  { kind: "on_fire", label: "On fire", minWagers: 5, amount: 250 },
+];
+
 export interface StipendAlert {
   amount: number;
-  kind: "normal" | "boosted" | "jackpot";
+  kind: "flat" | EngagementTier["kind"];
 }
 
 interface State {
@@ -324,23 +346,48 @@ export function logout() {
   listeners.forEach((l) => l());
 }
 
-// Variable-ratio reward: the surprise of an occasional bigger payout drives
-// more anticipation than a flat, predictable amount would. Odds are fixed
-// and always in the player's favor (never less than WEEKLY_STIPEND) — this
-// is meant to make a fake-currency top-up feel more fun, not to manipulate
-// anyone into risking more than they intend to.
-function rollStipend(): StipendAlert {
-  const r = Math.random();
-  if (r < 0.1) return { amount: 300, kind: "jackpot" };
-  if (r < 0.3) return { amount: 150 + Math.floor(Math.random() * 100), kind: "boosted" };
-  return { amount: WEEKLY_STIPEND, kind: "normal" };
+export function isFlatStipendWeek(now = Date.now()): boolean {
+  return now < LAUNCH_DATE + WEEK_MS;
+}
+
+// How many wagers a user placed in the trailing 7 days — the engagement
+// signal the stipend tier is based on once the flat first week is over.
+export function weeklyWagerCount(userId: string, now = Date.now()): number {
+  const cutoff = now - WEEK_MS;
+  return state.transactions.filter(
+    (t) => t.userId === userId && t.type === "wager" && new Date(t.timestamp).getTime() >= cutoff,
+  ).length;
+}
+
+export function engagementTierFor(wagerCount: number): EngagementTier {
+  let tier = ENGAGEMENT_TIERS[0];
+  for (const t of ENGAGEMENT_TIERS) {
+    if (wagerCount >= t.minWagers) tier = t;
+  }
+  return tier;
+}
+
+// What a user's next weekly stipend will be if collected right now — used
+// both to actually roll it at login and to preview it in the Profile Token
+// tab, so the two can never drift apart.
+export function projectedStipend(
+  userId: string,
+  now = Date.now(),
+): { amount: number; kind: StipendAlert["kind"]; tier: EngagementTier | null; wagerCount: number } {
+  const wagerCount = weeklyWagerCount(userId, now);
+  if (isFlatStipendWeek(now)) {
+    return { amount: WEEKLY_STIPEND, kind: "flat", tier: null, wagerCount };
+  }
+  const tier = engagementTierFor(wagerCount);
+  return { amount: tier.amount, kind: tier.kind, tier, wagerCount };
 }
 
 async function applyWeeklyStipendIfDue(user: User, lastStipendAt: string | null) {
   const due = !lastStipendAt || Date.now() - new Date(lastStipendAt).getTime() > WEEK_MS;
   if (!due) return;
 
-  const stipend = rollStipend();
+  const { amount, kind } = projectedStipend(user.id);
+  const stipend: StipendAlert = { amount, kind };
   const client = requireClient();
   const { data: updated, error } = await client
     .from("users")
