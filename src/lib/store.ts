@@ -422,6 +422,45 @@ export async function voidBet(betId: string): Promise<void> {
   setState({ bets: upsertById(state.bets, mapBet(betRow)) });
 }
 
+// Creator-only, and only before a bet settles — once it's resolved/void the
+// outcome may already be reflected in balances, streaks, and leaderboard
+// history, so removing it silently would be more confusing than helpful.
+// Any wagers placed before deletion are refunded first, same as voidBet,
+// so tokens never just disappear.
+export async function deleteBet(betId: string, requestingUserId: string): Promise<void> {
+  const client = requireClient();
+  const bet = state.bets.find((b) => b.id === betId);
+  if (!bet) throw new Error("Bet not found");
+  if (bet.creatorId !== requestingUserId) throw new Error("Only the creator can delete this bet");
+  if (bet.status === "resolved" || bet.status === "void") {
+    throw new Error("Can't delete a settled bet — flag it as disputed instead");
+  }
+
+  const wagers = state.wagers.filter((w) => w.betId === betId);
+  for (const w of wagers) {
+    const user = state.users.find((u) => u.id === w.userId);
+    if (user) {
+      const { data: userRow, error: userErr } = await client
+        .from("users")
+        .update({ token_balance: user.tokenBalance + w.amount })
+        .eq("id", user.id)
+        .select()
+        .single();
+      if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+    }
+    await client.from("transactions").insert({ user_id: w.userId, type: "refund", amount: w.amount });
+  }
+
+  const { error: deleteErr } = await client.from("bets").delete().eq("id", betId);
+  if (deleteErr) throw new Error(deleteErr.message);
+
+  setState({
+    bets: removeById(state.bets, betId),
+    wagers: state.wagers.filter((w) => w.betId !== betId),
+    comments: state.comments.filter((c) => c.betId !== betId),
+  });
+}
+
 // ---- Comments ----
 
 export async function addComment(betId: string, userId: string, text: string) {

@@ -5,6 +5,7 @@ import {
   MIN_WAGER,
   addComment,
   betTotals,
+  deleteBet,
   effectiveStatus,
   flagDispute,
   placeWager,
@@ -15,6 +16,7 @@ import {
 import { SplitBar } from "../components/SplitBar";
 import { Countdown } from "../components/Countdown";
 import { Avatar } from "../components/Avatar";
+import { ShareButton } from "../components/ShareButton";
 import { CATEGORY_EMOJI } from "../lib/categories";
 import type { Side } from "../types";
 
@@ -28,6 +30,8 @@ export function BetDetail() {
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const bet = state.bets.find((b) => b.id === id);
   if (!bet) {
@@ -88,6 +92,19 @@ export function BetDetail() {
     }
   }
 
+  async function handleDelete() {
+    if (!user) return;
+    setDeleting(true);
+    try {
+      await deleteBet(bet!.id, user.id);
+      navigate("/");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+      setDeleting(false);
+      setConfirmingDelete(false);
+    }
+  }
+
   async function submitComment(e: FormEvent) {
     e.preventDefault();
     if (!user || !commentText.trim()) return;
@@ -106,12 +123,51 @@ export function BetDetail() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
-      <button
-        onClick={() => navigate(-1)}
-        className="text-sm font-medium text-(--color-ink-soft) hover:text-(--color-ink)"
-      >
-        ← Back
-      </button>
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => navigate(-1)}
+          className="text-sm font-medium text-(--color-ink-soft) hover:text-(--color-ink)"
+        >
+          ← Back
+        </button>
+        <div className="flex items-center gap-2">
+          {user?.id === bet.creatorId && (status === "open" || status === "locked") && (
+            <>
+              {confirmingDelete ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-(--color-ink-soft)">Delete this bet?</span>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="rounded-full bg-(--color-no) px-2.5 py-1 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                  >
+                    {deleting ? "Deleting…" : "Confirm"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDelete(false)}
+                    disabled={deleting}
+                    className="text-xs font-medium text-(--color-ink-soft) hover:text-(--color-ink)"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-(--color-ink-soft) transition hover:bg-(--color-no-soft) hover:text-(--color-no)"
+                >
+                  Delete
+                </button>
+              )}
+            </>
+          )}
+          <ShareButton url={`${window.location.origin}/bets/${bet.id}`} title={bet.title} />
+        </div>
+      </div>
+
+      {error && (
+        <p className="mt-3 rounded-xl bg-(--color-no-soft) px-4 py-2.5 text-sm text-(--color-no)">{error}</p>
+      )}
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
         <div className="flex items-start justify-between gap-3">
@@ -237,7 +293,6 @@ export function BetDetail() {
                 to it.
               </p>
             )}
-            {error && <p className="mt-2 text-sm text-(--color-no)">{error}</p>}
           </form>
         )}
 

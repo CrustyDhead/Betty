@@ -1,6 +1,6 @@
 export type BetStatus = "open" | "locked" | "resolved" | "void";
 export type Side = "yes" | "no";
-export type BetCategory = "WFH" | "Sick" | "Late" | "Custom";
+export type BetCategory = "WFH" | "Sick" | "Late" | "Dare" | "Custom";
 
 export interface User {
   id: string;
