@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { Bet } from "../types";
-import { betTotals, effectiveStatus, userPosition } from "../lib/store";
+import { betSubjects, betTotals, effectiveStatus, joinNames, userPosition } from "../lib/store";
 import { useStoreState } from "../lib/useStore";
 import { SplitBar } from "./SplitBar";
 import { Countdown } from "./Countdown";
@@ -15,9 +15,8 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: string | null }) {
-  const state = useStoreState();
-  const subject = bet.subjectUserId ? state.users.find((u) => u.id === bet.subjectUserId) : null;
-  const subjectName = subject?.name ?? bet.subjectName;
+  useStoreState();
+  const { registered, names } = betSubjects(bet);
   const { yes, no, total, wagers } = betTotals(bet.id);
   const status = effectiveStatus(bet);
   const position = currentUserId ? userPosition(bet.id, currentUserId) : null;
@@ -29,8 +28,8 @@ export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: strin
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          {subjectName && (
-            <Avatar name={subjectName} emoji={subject?.avatarEmoji} color={subject?.avatarColor} />
+          {registered[0] && (
+            <Avatar name={registered[0].name} emoji={registered[0].avatarEmoji} color={registered[0].avatarColor} />
           )}
           <div>
             <h3 className="font-display text-base font-semibold leading-snug text-(--color-ink)">
@@ -38,7 +37,7 @@ export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: strin
             </h3>
             <p className="text-xs text-(--color-ink-soft)">
               {CATEGORY_EMOJI[bet.category]} {bet.category}
-              {subjectName ? ` · about ${subjectName}` : ""}
+              {names.length > 0 ? ` · about ${joinNames(names)}` : ""}
             </p>
           </div>
         </div>

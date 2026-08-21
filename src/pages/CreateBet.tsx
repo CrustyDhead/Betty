@@ -1,9 +1,16 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { createBet } from "../lib/store";
+import { createBet, joinNames } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { CATEGORIES, CATEGORY_EMOJI } from "../lib/categories";
 import type { BetCategory } from "../types";
+
+function parseOtherNames(text: string): string[] {
+  return text
+    .split(",")
+    .map((n) => n.trim())
+    .filter(Boolean);
+}
 
 function toLocalDateTimeValue(d: Date) {
   // datetime-local inputs read/write local wall-clock time, not UTC — build
@@ -38,38 +45,47 @@ export function CreateBet() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [subjectUserId, setSubjectUserId] = useState("");
-  const [subjectName, setSubjectName] = useState("");
+  const [subjectUserIds, setSubjectUserIds] = useState<string[]>([]);
+  const [otherNamesText, setOtherNamesText] = useState("");
   const [category, setCategory] = useState<BetCategory>("WFH");
   const [lockTime, setLockTime] = useState(defaultLockTime());
   const [error, setError] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<(typeof QUICK_TEMPLATES)[number] | null>(null);
 
-  function subjectDisplayName(id: string, freeTextName: string) {
-    if (id === "__other__") return freeTextName.trim();
-    return state.users.find((u) => u.id === id)?.name ?? "";
+  function currentSubjectNames(otherText: string) {
+    const registeredNames = subjectUserIds
+      .map((id) => state.users.find((u) => u.id === id)?.name)
+      .filter((n): n is string => !!n);
+    return [...registeredNames, ...parseOtherNames(otherText)];
   }
 
   function applyTemplate(tpl: (typeof QUICK_TEMPLATES)[number]) {
     setActiveTemplate(tpl);
     setCategory(tpl.category);
     setLockTime(endOfWorkdayLockTime());
-    const name = subjectDisplayName(subjectUserId, subjectName);
-    setTitle(tpl.question(name || "___"));
+    const names = currentSubjectNames(otherNamesText);
+    setTitle(tpl.question(names.length > 0 ? joinNames(names) : "___"));
   }
 
-  function handleSubjectChange(id: string) {
-    setSubjectUserId(id);
-    if (activeTemplate && id !== "__other__") {
-      const name = subjectDisplayName(id, subjectName);
-      if (name) setTitle(activeTemplate.question(name));
+  function toggleSubject(id: string) {
+    const next = subjectUserIds.includes(id)
+      ? subjectUserIds.filter((x) => x !== id)
+      : [...subjectUserIds, id];
+    setSubjectUserIds(next);
+    if (activeTemplate) {
+      const registeredNames = next
+        .map((uid) => state.users.find((u) => u.id === uid)?.name)
+        .filter((n): n is string => !!n);
+      const names = [...registeredNames, ...parseOtherNames(otherNamesText)];
+      setTitle(activeTemplate.question(names.length > 0 ? joinNames(names) : "___"));
     }
   }
 
-  function handleSubjectNameChange(name: string) {
-    setSubjectName(name);
-    if (activeTemplate && subjectUserId === "__other__" && name.trim()) {
-      setTitle(activeTemplate.question(name.trim()));
+  function handleOtherNamesChange(text: string) {
+    setOtherNamesText(text);
+    if (activeTemplate) {
+      const names = currentSubjectNames(text);
+      setTitle(activeTemplate.question(names.length > 0 ? joinNames(names) : "___"));
     }
   }
 
@@ -90,8 +106,8 @@ export function CreateBet() {
       const bet = await createBet({
         title: title.trim(),
         description: description.trim(),
-        subjectUserId: subjectUserId === "__other__" ? null : subjectUserId || null,
-        subjectName: subjectUserId === "__other__" ? subjectName.trim() || null : null,
+        subjectUserIds,
+        subjectNames: parseOtherNames(otherNamesText),
         creatorId: user.id,
         lockTime: lockDate.toISOString(),
         category,
@@ -177,37 +193,43 @@ export function CreateBet() {
           </div>
         </div>
 
-        <label className="block text-sm font-medium text-(--color-ink)">
-          Subject <span className="font-normal text-(--color-ink-soft)">(who's this about?)</span>
-          <select
-            value={subjectUserId}
-            onChange={(e) => handleSubjectChange(e.target.value)}
-            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
-          >
-            <option value="">Nobody in particular</option>
+        <div>
+          <p className="text-sm font-medium text-(--color-ink)">
+            Subjects <span className="font-normal text-(--color-ink-soft)">(who's this about? pick any number)</span>
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-2">
             {state.users.map((u) => (
-              <option key={u.id} value={u.id}>
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => toggleSubject(u.id)}
+                className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                  subjectUserIds.includes(u.id)
+                    ? "bg-(--color-ink) text-white"
+                    : "bg-(--color-bg) text-(--color-ink-soft) hover:text-(--color-ink)"
+                }`}
+              >
                 {u.name}
-              </option>
+              </button>
             ))}
-            <option value="__other__">Someone else (type a name)</option>
-          </select>
-        </label>
+          </div>
+          <p className="mt-2 text-xs font-normal text-(--color-ink-soft)">
+            Anyone picked here can't wager on this bet themselves.
+          </p>
+        </div>
 
-        {subjectUserId === "__other__" && (
-          <label className="block text-sm font-medium text-(--color-ink)">
-            Their name
-            <input
-              value={subjectName}
-              onChange={(e) => handleSubjectNameChange(e.target.value)}
-              placeholder="e.g. Ploy"
-              className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
-            />
-            <span className="mt-1 block text-xs font-normal text-(--color-ink-soft)">
-              They don't need an account for this — but they'll need one to bet themselves.
-            </span>
-          </label>
-        )}
+        <label className="block text-sm font-medium text-(--color-ink)">
+          Other subjects <span className="font-normal text-(--color-ink-soft)">(not on the app yet, optional)</span>
+          <input
+            value={otherNamesText}
+            onChange={(e) => handleOtherNamesChange(e.target.value)}
+            placeholder="e.g. Ploy, Nat"
+            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
+          />
+          <span className="mt-1 block text-xs font-normal text-(--color-ink-soft)">
+            Comma-separated. They don't need an account for this — but they'll need one to bet themselves.
+          </span>
+        </label>
 
         <label className="block text-sm font-medium text-(--color-ink)">
           Lock time

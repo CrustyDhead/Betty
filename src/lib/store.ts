@@ -89,8 +89,8 @@ function mapBet(row: Row): Bet {
     id: row.id,
     title: row.title,
     description: row.description,
-    subjectUserId: row.subject_user_id,
-    subjectName: row.subject_name ?? null,
+    subjectUserIds: row.subject_user_ids ?? [],
+    subjectNames: row.subject_names ?? [],
     creatorId: row.creator_id,
     lockTime: row.lock_time,
     status: row.status,
@@ -473,6 +473,23 @@ export function effectiveStatus(bet: Bet): BetStatus {
   return bet.status;
 }
 
+// Registered-user subjects (with avatar info) plus free-text subjects, in
+// that order — used anywhere a bet's "about X, Y and Z" line is rendered.
+export function betSubjects(bet: Bet) {
+  const registered = bet.subjectUserIds
+    .map((id) => state.users.find((u) => u.id === id))
+    .filter((u): u is User => !!u);
+  const names = [...registered.map((u) => u.name), ...bet.subjectNames];
+  return { registered, names };
+}
+
+export function joinNames(names: string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
 export function betTotals(betId: string) {
   const wagers = state.wagers.filter((w) => w.betId === betId);
   const yes = wagers.filter((w) => w.side === "yes").reduce((sum, w) => sum + w.amount, 0);
@@ -489,8 +506,8 @@ export function userPosition(betId: string, userId: string) {
 export async function createBet(input: {
   title: string;
   description: string;
-  subjectUserId: string | null;
-  subjectName: string | null;
+  subjectUserIds: string[];
+  subjectNames: string[];
   creatorId: string;
   lockTime: string;
   category: BetCategory;
@@ -501,8 +518,8 @@ export async function createBet(input: {
     .insert({
       title: input.title,
       description: input.description,
-      subject_user_id: input.subjectUserId,
-      subject_name: input.subjectName,
+      subject_user_ids: input.subjectUserIds,
+      subject_names: input.subjectNames,
       creator_id: input.creatorId,
       lock_time: input.lockTime,
       category: input.category,
@@ -522,7 +539,7 @@ export async function placeWager(betId: string, userId: string, side: Side, amou
   const user = state.users.find((u) => u.id === userId);
   if (!bet) throw new Error("Bet not found");
   if (!user) throw new Error("User not found");
-  if (bet.subjectUserId === userId) throw new Error("You can't wager on a bet you're the subject of");
+  if (bet.subjectUserIds.includes(userId)) throw new Error("You can't wager on a bet you're the subject of");
   if (effectiveStatus(bet) !== "open") throw new Error("Bet is no longer accepting wagers");
   if (!Number.isInteger(amount) || amount < MIN_WAGER) {
     throw new Error(`Wagers must be a whole number of at least ${MIN_WAGER} tokens`);

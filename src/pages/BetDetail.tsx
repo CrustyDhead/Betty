@@ -4,10 +4,12 @@ import { useCurrentUser, useStoreState } from "../lib/useStore";
 import {
   MIN_WAGER,
   addComment,
+  betSubjects,
   betTotals,
   deleteBet,
   effectiveStatus,
   flagDispute,
+  joinNames,
   placeWager,
   reResolve,
   resolveBet,
@@ -52,8 +54,7 @@ export function BetDetail() {
 
   const status = effectiveStatus(bet);
   const { yes, no, total, wagers } = betTotals(bet.id);
-  const subject = bet.subjectUserId ? state.users.find((u) => u.id === bet.subjectUserId) : null;
-  const subjectName = subject?.name ?? bet.subjectName;
+  const { registered: subjectUsers, names: subjectNames } = betSubjects(bet);
   const creator = state.users.find((u) => u.id === bet.creatorId);
   const position = user ? userPosition(bet.id, user.id) : null;
   const side: Side = sideOverride ?? position?.side ?? "yes";
@@ -187,11 +188,11 @@ export function BetDetail() {
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            {subjectName && (
+            {subjectUsers[0] && (
               <Avatar
-                name={subjectName}
-                emoji={subject?.avatarEmoji}
-                color={subject?.avatarColor}
+                name={subjectUsers[0].name}
+                emoji={subjectUsers[0].avatarEmoji}
+                color={subjectUsers[0].avatarColor}
                 size="md"
               />
             )}
@@ -201,7 +202,8 @@ export function BetDetail() {
               </h1>
               <p className="text-xs text-(--color-ink-soft)">
                 {CATEGORY_EMOJI[bet.category]} {bet.category} ·{" "}
-                {subjectName ? `about ${subjectName} · ` : ""}created by {creator?.name ?? "?"}
+                {subjectNames.length > 0 ? `about ${joinNames(subjectNames)} · ` : ""}created by{" "}
+                {creator?.name ?? "?"}
               </p>
             </div>
           </div>
@@ -281,13 +283,13 @@ export function BetDetail() {
           </div>
         )}
 
-        {status === "open" && user && user.id === bet.subjectUserId && (
+        {status === "open" && user && bet.subjectUserIds.includes(user.id) && (
           <p className="mt-6 border-t border-black/5 pt-5 text-sm text-(--color-ink-soft)">
-            You're the subject of this bet, so you can't wager on it.
+            You're a subject of this bet, so you can't wager on it.
           </p>
         )}
 
-        {status === "open" && user && user.id !== bet.subjectUserId && (
+        {status === "open" && user && !bet.subjectUserIds.includes(user.id) && (
           <form onSubmit={submitWager} className="mt-6 border-t border-black/5 pt-5">
             <div className="flex gap-2">
               <button

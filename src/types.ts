@@ -14,11 +14,11 @@ export interface Bet {
   id: string;
   title: string;
   description: string;
-  subjectUserId: string | null;
-  // Set when the bet is about someone who hasn't joined the app yet (e.g.
-  // "can Ploy finish 2 water bottles" before Ploy has ever logged in).
-  // Mutually exclusive with subjectUserId — at most one is set.
-  subjectName: string | null;
+  subjectUserIds: string[];
+  // People the bet is about who haven't joined the app yet (e.g. "can Ploy
+  // finish 2 water bottles" before Ploy has ever logged in) — free text,
+  // alongside subjectUserIds rather than instead of it.
+  subjectNames: string[];
   creatorId: string;
   lockTime: string; // ISO timestamp
   status: BetStatus;
