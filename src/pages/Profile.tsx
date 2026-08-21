@@ -41,8 +41,8 @@ export function Profile() {
   const viewedUser = userId ? state.users.find((u) => u.id === userId) : currentUser;
   const isOwn = !!currentUser && !!viewedUser && viewedUser.id === currentUser.id;
 
-  const [tab, setTab] = useState<"token" | "badges" | "profile">("token");
-  const effectiveTab = tab === "profile" && !isOwn ? "token" : tab;
+  const [tab, setTab] = useState<"profile" | "token" | "settings">("profile");
+  const effectiveTab = tab === "settings" && !isOwn ? "profile" : tab;
 
   const [newName, setNewName] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -199,6 +199,14 @@ export function Profile() {
 
       <div className="mt-5 flex gap-1 rounded-full bg-gray-100 p-1">
         <button
+          onClick={() => setTab("profile")}
+          className={`flex-1 rounded-full py-2 font-display text-sm font-semibold transition ${
+            effectiveTab === "profile" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
+          }`}
+        >
+          Profile
+        </button>
+        <button
           onClick={() => setTab("token")}
           className={`flex-1 rounded-full py-2 font-display text-sm font-semibold transition ${
             effectiveTab === "token" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
@@ -206,22 +214,14 @@ export function Profile() {
         >
           Token
         </button>
-        <button
-          onClick={() => setTab("badges")}
-          className={`flex-1 rounded-full py-2 font-display text-sm font-semibold transition ${
-            effectiveTab === "badges" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
-          }`}
-        >
-          Badges
-        </button>
         {isOwn && (
           <button
-            onClick={() => setTab("profile")}
+            onClick={() => setTab("settings")}
             className={`flex-1 rounded-full py-2 font-display text-sm font-semibold transition ${
-              effectiveTab === "profile" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
+              effectiveTab === "settings" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
             }`}
           >
-            Profile
+            Settings
           </button>
         )}
       </div>
@@ -324,8 +324,35 @@ export function Profile() {
         </div>
       )}
 
-      {effectiveTab === "badges" && (
+      {effectiveTab === "profile" && (
         <div className="mt-5">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+            Win rate
+          </h2>
+          {winRate !== null ? (
+            <div className="mt-3 flex items-center justify-between rounded-2xl bg-(--color-surface) p-4 shadow-sm shadow-black/5">
+              <div>
+                <p className="font-mono text-2xl font-semibold text-(--color-ink)">{winRate}%</p>
+                <p className="text-xs text-(--color-ink-soft)">
+                  {wins} win{wins === 1 ? "" : "s"} of {settledCount} settled
+                </p>
+              </div>
+              {streak.kind === "win" && streak.streak >= 2 && (
+                <span
+                  className="rounded-full bg-(--color-yes-soft) px-2.5 py-1 text-xs font-semibold text-(--color-yes-text)"
+                  title={`${streak.streak} correct calls in a row`}
+                >
+                  🔥 {streak.streak} streak
+                </span>
+              )}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-(--color-ink-soft)">No settled bets yet.</p>
+          )}
+
+          <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+            Badges
+          </h2>
           {badges.length === 0 ? (
             <p className="mt-3 text-sm text-(--color-ink-soft)">
               None yet — win a couple bets in a row to unlock some.
@@ -345,7 +372,7 @@ export function Profile() {
         </div>
       )}
 
-      {effectiveTab === "profile" && isOwn && (
+      {effectiveTab === "settings" && isOwn && (
         <div className="mt-5">
           <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
             Name
@@ -448,10 +475,6 @@ export function Profile() {
           <p className="text-xs text-(--color-ink-soft)">Losses</p>
         </div>
       </div>
-
-      {winRate !== null && (
-        <p className="mt-3 text-center text-sm text-(--color-ink-soft)">{winRate}% win rate</p>
-      )}
 
       {isOwn && notifPermission !== "unsupported" && (
         <>
