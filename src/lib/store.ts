@@ -162,6 +162,53 @@ async function fetchAll() {
   });
 }
 
+// Fires a browser notification when a bet the current user has a wager on
+// transitions into resolved/void. Only called from the polling paths, never
+// from the initial load — otherwise every already-settled bet in history
+// would fire a notification the moment the page opens. Bets that appear
+// mid-poll with no prior snapshot are treated as already-settled (skipped)
+// rather than risk a false positive from an unknown prior state.
+function notifyOnResolutions(prevBets: Bet[], newBets: Bet[], wagers: Wager[]) {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const currentUserId = getCurrentUserId();
+  if (!currentUserId) return;
+
+  for (const bet of newBets) {
+    const prev = prevBets.find((b) => b.id === bet.id);
+    const wasSettled = prev ? prev.status === "resolved" || prev.status === "void" : true;
+    const isSettled = bet.status === "resolved" || bet.status === "void";
+    if (wasSettled || !isSettled) continue;
+
+    const myWager = wagers.find((w) => w.betId === bet.id && w.userId === currentUserId);
+    if (!myWager) continue;
+
+    const body =
+      bet.status === "void"
+        ? "Voided — your stake was refunded."
+        : myWager.payout !== null && myWager.payout > myWager.amount
+          ? `You won! +${Math.round(myWager.payout - myWager.amount)} tokens`
+          : "Resolved — this one didn't go your way.";
+
+    new Notification(bet.title, { body, icon: "/favicon.svg" });
+  }
+}
+
+async function pollAndNotify() {
+  const prevBets = state.bets;
+  await fetchAll();
+  notifyOnResolutions(prevBets, state.bets, state.wagers);
+}
+
+export function notificationPermission(): NotificationPermission | "unsupported" {
+  if (typeof Notification === "undefined") return "unsupported";
+  return Notification.permission;
+}
+
+export async function requestNotificationPermission(): Promise<NotificationPermission> {
+  if (typeof Notification === "undefined") return "denied";
+  return Notification.requestPermission();
+}
+
 export async function initStore() {
   if (initialized) return;
   initialized = true;
@@ -195,12 +242,12 @@ export async function initStore() {
     .subscribe();
 
   setInterval(() => {
-    fetchAll().catch(() => {});
+    pollAndNotify().catch(() => {});
   }, POLL_INTERVAL_MS);
 
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") fetchAll().catch(() => {});
+      if (document.visibilityState === "visible") pollAndNotify().catch(() => {});
     });
   }
 }

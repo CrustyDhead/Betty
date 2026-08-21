@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { currentStreak, logout, setAvatarEmoji, userWinStats } from "../lib/store";
+import {
+  currentStreak,
+  logout,
+  notificationPermission,
+  requestNotificationPermission,
+  setAvatarEmoji,
+  userWinStats,
+} from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { Avatar } from "../components/Avatar";
 import { AVATAR_EMOJI_OPTIONS } from "../lib/avatars";
@@ -9,6 +16,11 @@ export function Profile() {
   useStoreState();
   const [savingEmoji, setSavingEmoji] = useState<string | null>(null);
   const [emojiError, setEmojiError] = useState<string | null>(null);
+  const [notifPermission, setNotifPermission] = useState(notificationPermission());
+
+  async function handleEnableNotifications() {
+    setNotifPermission(await requestNotificationPermission());
+  }
 
   if (!user) return null;
 
@@ -124,6 +136,32 @@ export function Profile() {
             </span>
           ))}
         </div>
+      )}
+
+      {notifPermission !== "unsupported" && (
+        <>
+          <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+            Notifications
+          </h2>
+          {notifPermission === "granted" && (
+            <p className="mt-3 text-sm text-(--color-ink-soft)">
+              ✅ You'll get notified when a bet you're in resolves.
+            </p>
+          )}
+          {notifPermission === "denied" && (
+            <p className="mt-3 text-sm text-(--color-ink-soft)">
+              Blocked — enable notifications for this site in your browser settings if you want them.
+            </p>
+          )}
+          {notifPermission === "default" && (
+            <button
+              onClick={handleEnableNotifications}
+              className="mt-3 rounded-xl bg-gray-100 px-4 py-2.5 font-display text-sm font-semibold text-(--color-ink) transition hover:bg-gray-200"
+            >
+              Notify me when my bets resolve
+            </button>
+          )}
+        </>
       )}
 
       <button
