@@ -21,6 +21,11 @@ export const WEEKLY_STIPEND = 100;
 export const MIN_WAGER = 10;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
+export interface StipendAlert {
+  amount: number;
+  kind: "normal" | "boosted" | "jackpot";
+}
+
 interface State {
   users: User[];
   bets: Bet[];
@@ -29,6 +34,7 @@ interface State {
   comments: Comment[];
   loading: boolean;
   error: string | null;
+  stipendAlert: StipendAlert | null;
 }
 
 let state: State = {
@@ -39,6 +45,7 @@ let state: State = {
   comments: [],
   loading: true,
   error: null,
+  stipendAlert: null,
 };
 const listeners = new Set<() => void>();
 
@@ -230,21 +237,38 @@ export function logout() {
   listeners.forEach((l) => l());
 }
 
+// Variable-ratio reward: the surprise of an occasional bigger payout drives
+// more anticipation than a flat, predictable amount would. Odds are fixed
+// and always in the player's favor (never less than WEEKLY_STIPEND) — this
+// is meant to make a fake-currency top-up feel more fun, not to manipulate
+// anyone into risking more than they intend to.
+function rollStipend(): StipendAlert {
+  const r = Math.random();
+  if (r < 0.1) return { amount: 300, kind: "jackpot" };
+  if (r < 0.3) return { amount: 150 + Math.floor(Math.random() * 100), kind: "boosted" };
+  return { amount: WEEKLY_STIPEND, kind: "normal" };
+}
+
 async function applyWeeklyStipendIfDue(user: User, lastStipendAt: string | null) {
   const due = !lastStipendAt || Date.now() - new Date(lastStipendAt).getTime() > WEEK_MS;
   if (!due) return;
 
+  const stipend = rollStipend();
   const client = requireClient();
   const { data: updated, error } = await client
     .from("users")
-    .update({ token_balance: user.tokenBalance + WEEKLY_STIPEND, last_stipend_at: new Date().toISOString() })
+    .update({ token_balance: user.tokenBalance + stipend.amount, last_stipend_at: new Date().toISOString() })
     .eq("id", user.id)
     .select()
     .single();
   if (error) return; // non-critical — don't block login over a missed stipend
 
-  setState({ users: upsertById(state.users, mapUser(updated)) });
-  await client.from("transactions").insert({ user_id: user.id, type: "stipend", amount: WEEKLY_STIPEND });
+  setState({ users: upsertById(state.users, mapUser(updated)), stipendAlert: stipend });
+  await client.from("transactions").insert({ user_id: user.id, type: "stipend", amount: stipend.amount });
+}
+
+export function clearStipendAlert() {
+  setState({ stipendAlert: null });
 }
 
 // ---- Derived helpers ----

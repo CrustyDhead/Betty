@@ -17,7 +17,7 @@ const STATUS_LABEL: Record<string, string> = {
 export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: string | null }) {
   const state = useStoreState();
   const subject = bet.subjectUserId ? state.users.find((u) => u.id === bet.subjectUserId) : null;
-  const { yes, no, total } = betTotals(bet.id);
+  const { yes, no, total, wagers } = betTotals(bet.id);
   const status = effectiveStatus(bet);
   const position = currentUserId ? userPosition(bet.id, currentUserId) : null;
 
@@ -55,6 +55,11 @@ export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: strin
       <div className="mt-3 flex items-center justify-between">
         <span className="font-mono text-sm font-medium text-(--color-ink)">
           {total.toLocaleString()} tokens
+          {wagers.length > 0 && (
+            <span className="ml-1.5 font-sans text-xs font-normal text-(--color-ink-soft)">
+              · {wagers.length} {wagers.length === 1 ? "person" : "people"} in
+            </span>
+          )}
         </span>
         {position && (
           <span

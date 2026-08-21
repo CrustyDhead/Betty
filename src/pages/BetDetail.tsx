@@ -198,6 +198,7 @@ export function BetDetail() {
           <SplitBar yes={yes} no={no} size="lg" />
           <p className="mt-2 font-mono text-sm text-(--color-ink-soft)">
             {total.toLocaleString()} tokens in the pot
+            {wagers.length > 0 && ` · ${wagers.length} ${wagers.length === 1 ? "person" : "people"} in`}
           </p>
         </div>
 
@@ -287,6 +288,12 @@ export function BetDetail() {
                 Wager
               </button>
             </div>
+            {Number(amount) > 0 && (
+              <p className="mt-2 text-xs text-(--color-ink-soft)">
+                You're risking <span className="font-mono font-medium text-(--color-no)">{amount}</span>{" "}
+                tokens — gone for good if {side === "yes" ? "NO" : "YES"} wins.
+              </p>
+            )}
             {position && (
               <p className="mt-2 text-xs text-(--color-ink-soft)">
                 You already have {position.amount} tokens on {position.side.toUpperCase()} — this adds
@@ -329,30 +336,43 @@ export function BetDetail() {
           )}
           {wagers.map((w) => {
             const bettor = state.users.find((u) => u.id === w.userId);
+
+            // Near-miss framing: only claim it was close when the losing
+            // side genuinely held a meaningful share of the pool — a real
+            // 15% loss framed as "so close" would just be dishonest.
+            let nearMiss: string | null = null;
+            if (w.payout === 0 && bet.status === "resolved" && total > 0) {
+              const losingTotal = bet.outcome === "yes" ? no : yes;
+              const share = Math.round((losingTotal / total) * 100);
+              if (share >= 35) {
+                nearMiss = `So close — ${w.side.toUpperCase()} had ${share}% of the pool`;
+              }
+            }
+
             return (
-              <div
-                key={w.id}
-                className="flex items-center justify-between rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Avatar name={bettor?.name ?? "?"} />
-                  <span className="text-sm font-medium text-(--color-ink)">{bettor?.name}</span>
+              <div key={w.id} className="rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <Avatar name={bettor?.name ?? "?"} />
+                    <span className="text-sm font-medium text-(--color-ink)">{bettor?.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm text-(--color-ink)">{w.amount}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        w.side === "yes"
+                          ? "bg-(--color-yes-soft) text-(--color-yes)"
+                          : "bg-(--color-no-soft) text-(--color-no)"
+                      }`}
+                    >
+                      {w.side.toUpperCase()}
+                    </span>
+                    {w.payout !== null && (
+                      <span className="font-mono text-xs text-(--color-ink-soft)">→ {Math.round(w.payout)}</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm text-(--color-ink)">{w.amount}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      w.side === "yes"
-                        ? "bg-(--color-yes-soft) text-(--color-yes)"
-                        : "bg-(--color-no-soft) text-(--color-no)"
-                    }`}
-                  >
-                    {w.side.toUpperCase()}
-                  </span>
-                  {w.payout !== null && (
-                    <span className="font-mono text-xs text-(--color-ink-soft)">→ {Math.round(w.payout)}</span>
-                  )}
-                </div>
+                {nearMiss && <p className="mt-1.5 pl-9 text-xs text-(--color-no)">{nearMiss}</p>}
               </div>
             );
           })}
