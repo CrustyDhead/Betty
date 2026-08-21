@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useParams } from "react-router-dom";
 import {
   currentStreak,
   logout,
@@ -34,9 +35,14 @@ function formatTimestamp(iso: string) {
 }
 
 export function Profile() {
-  const user = useCurrentUser();
+  const { userId } = useParams<{ userId: string }>();
+  const currentUser = useCurrentUser();
   const state = useStoreState();
-  const [tab, setTab] = useState<"token" | "profile">("token");
+  const viewedUser = userId ? state.users.find((u) => u.id === userId) : currentUser;
+  const isOwn = !!currentUser && !!viewedUser && viewedUser.id === currentUser.id;
+
+  const [tab, setTab] = useState<"token" | "badges" | "profile">("token");
+  const effectiveTab = tab === "profile" && !isOwn ? "token" : tab;
 
   const [newName, setNewName] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -58,12 +64,19 @@ export function Profile() {
     setNotifPermission(await requestNotificationPermission());
   }
 
-  if (!user) return null;
+  if (!currentUser) return null;
+  if (!viewedUser) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-6">
+        <p className="text-sm text-(--color-ink-soft)">User not found.</p>
+      </div>
+    );
+  }
 
-  const { settledCount, wins, losses } = userWinStats(user.id);
+  const { settledCount, wins, losses } = userWinStats(viewedUser.id);
   const winRate = settledCount > 0 ? Math.round((wins / settledCount) * 100) : null;
-  const streak = currentStreak(user.id);
-  const transactions = userTransactions(user.id);
+  const streak = currentStreak(viewedUser.id);
+  const transactions = userTransactions(viewedUser.id);
 
   const badges: { label: string; emoji: string }[] = [];
   if (streak.kind === "win" && streak.streak >= 2) {
@@ -72,7 +85,7 @@ export function Profile() {
   if (wins >= 5) {
     badges.push({ label: `${wins} lifetime wins`, emoji: "🏆" });
   }
-  if (user.tokenBalance >= 2000) {
+  if (viewedUser.tokenBalance >= 2000) {
     badges.push({ label: "Whale — 2,000+ tokens", emoji: "🐋" });
   }
 
@@ -90,7 +103,7 @@ export function Profile() {
 
   async function handleRename(e: FormEvent) {
     e.preventDefault();
-    if (!user) return;
+    if (!currentUser) return;
     setRenameError(null);
     setRenameSuccess(null);
     if (!newName.trim()) {
@@ -99,7 +112,7 @@ export function Profile() {
     }
     setRenaming(true);
     try {
-      await renameUser(user.id, newName);
+      await renameUser(currentUser.id, newName);
       setRenameSuccess("Name updated.");
       setNewName("");
     } catch (err) {
@@ -110,11 +123,11 @@ export function Profile() {
   }
 
   async function handlePickEmoji(emoji: string | null) {
-    if (!user) return;
+    if (!currentUser) return;
     setSavingEmoji(emoji ?? "__reset__");
     setEmojiError(null);
     try {
-      await setAvatarEmoji(user.id, emoji);
+      await setAvatarEmoji(currentUser.id, emoji);
     } catch (err) {
       setEmojiError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -123,11 +136,11 @@ export function Profile() {
   }
 
   async function handlePickColor(color: string | null) {
-    if (!user) return;
+    if (!currentUser) return;
     setSavingColor(color ?? "__reset__");
     setColorError(null);
     try {
-      await setAvatarColor(user.id, color);
+      await setAvatarColor(currentUser.id, color);
     } catch (err) {
       setColorError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -137,7 +150,7 @@ export function Profile() {
 
   async function handleTransfer(e: FormEvent) {
     e.preventDefault();
-    if (!user) return;
+    if (!currentUser) return;
     setTransferError(null);
     setTransferSuccess(null);
     const amt = Number(transferAmount);
@@ -151,7 +164,7 @@ export function Profile() {
     }
     setSending(true);
     try {
-      await transferTokens(user.id, transferTo, amt);
+      await transferTokens(currentUser.id, transferTo, amt);
       const recipientName = state.users.find((u) => u.id === transferTo)?.name ?? "them";
       setTransferSuccess(`Sent ${amt} tokens to ${recipientName}.`);
       setTransferAmount("");
@@ -165,84 +178,105 @@ export function Profile() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
-      <h1 className="font-display text-xl font-semibold text-(--color-ink)">Profile</h1>
+      <h1 className="font-display text-xl font-semibold text-(--color-ink)">
+        {isOwn ? "Profile" : `${viewedUser.name}'s profile`}
+      </h1>
 
       <div className="mt-5 flex items-center gap-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
-        <Avatar name={user.name} emoji={user.avatarEmoji} color={user.avatarColor} size="md" />
+        <Avatar name={viewedUser.name} emoji={viewedUser.avatarEmoji} color={viewedUser.avatarColor} size="md" />
         <div>
-          <p className="font-display text-lg font-semibold text-(--color-ink)">{user.name}</p>
+          <p className="font-display text-lg font-semibold text-(--color-ink)">{viewedUser.name}</p>
           <p className="font-mono text-sm text-(--color-ink-soft)">
-            {Math.round(user.tokenBalance).toLocaleString()} tokens
+            {Math.round(viewedUser.tokenBalance).toLocaleString()} tokens
           </p>
         </div>
+        {!isOwn && (
+          <span className="ml-auto shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-(--color-ink-soft)">
+            👁 View only
+          </span>
+        )}
       </div>
 
       <div className="mt-5 flex gap-1 rounded-full bg-gray-100 p-1">
         <button
           onClick={() => setTab("token")}
           className={`flex-1 rounded-full py-2 font-display text-sm font-semibold transition ${
-            tab === "token" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
+            effectiveTab === "token" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
           }`}
         >
           Token
         </button>
         <button
-          onClick={() => setTab("profile")}
+          onClick={() => setTab("badges")}
           className={`flex-1 rounded-full py-2 font-display text-sm font-semibold transition ${
-            tab === "profile" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
+            effectiveTab === "badges" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
           }`}
         >
-          Profile
+          Badges
         </button>
+        {isOwn && (
+          <button
+            onClick={() => setTab("profile")}
+            className={`flex-1 rounded-full py-2 font-display text-sm font-semibold transition ${
+              effectiveTab === "profile" ? "bg-(--color-surface) text-(--color-ink) shadow-sm" : "text-(--color-ink-soft)"
+            }`}
+          >
+            Profile
+          </button>
+        )}
       </div>
 
-      {tab === "token" && (
+      {effectiveTab === "token" && (
         <div className="mt-5">
-          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
-            Send tokens
-          </h2>
-          {state.users.filter((u) => u.id !== user.id).length === 0 ? (
-            <p className="mt-3 text-sm text-(--color-ink-soft)">No one else has joined yet.</p>
-          ) : (
-            <form
-              onSubmit={handleTransfer}
-              className="mt-3 rounded-2xl bg-(--color-surface) p-4 shadow-sm shadow-black/5"
-            >
-              <div className="flex gap-2">
-                <select
-                  value={transferTo}
-                  onChange={(e) => setTransferTo(e.target.value)}
-                  className="flex-1 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
+          {isOwn && (
+            <>
+              <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+                Send tokens
+              </h2>
+              {state.users.filter((u) => u.id !== currentUser.id).length === 0 ? (
+                <p className="mt-3 text-sm text-(--color-ink-soft)">No one else has joined yet.</p>
+              ) : (
+                <form
+                  onSubmit={handleTransfer}
+                  className="mt-3 rounded-2xl bg-(--color-surface) p-4 shadow-sm shadow-black/5"
                 >
-                  <option value="">Who to?</option>
-                  {state.users
-                    .filter((u) => u.id !== user.id)
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                </select>
-                <input
-                  value={transferAmount}
-                  onChange={(e) => setTransferAmount(e.target.value)}
-                  type="number"
-                  step="any"
-                  inputMode="numeric"
-                  placeholder="Amount"
-                  className="w-28 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 font-mono text-sm outline-none focus:border-(--color-yes-text)"
-                />
-                <button
-                  type="submit"
-                  disabled={sending}
-                  className="rounded-xl bg-(--color-ink) px-4 py-2.5 font-display text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
-                >
-                  {sending ? "…" : "Send"}
-                </button>
-              </div>
-              {transferError && <p className="mt-2 text-sm text-(--color-no-text)">{transferError}</p>}
-              {transferSuccess && <p className="mt-2 text-sm text-(--color-yes-text)">{transferSuccess}</p>}
-            </form>
+                  <div className="flex gap-2">
+                    <select
+                      value={transferTo}
+                      onChange={(e) => setTransferTo(e.target.value)}
+                      className="flex-1 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
+                    >
+                      <option value="">Who to?</option>
+                      {state.users
+                        .filter((u) => u.id !== currentUser.id)
+                        .map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}
+                          </option>
+                        ))}
+                    </select>
+                    <input
+                      value={transferAmount}
+                      onChange={(e) => setTransferAmount(e.target.value)}
+                      type="number"
+                      step="any"
+                      inputMode="numeric"
+                      placeholder="Amount"
+                      className="w-28 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 font-mono text-sm outline-none focus:border-(--color-yes-text)"
+                    />
+                    <button
+                      type="submit"
+                      disabled={sending}
+                      className="rounded-xl bg-(--color-ink) px-4 py-2.5 font-display text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                    >
+                      {sending ? "…" : "Send"}
+                    </button>
+                  </div>
+                  {transferError && <p className="mt-2 text-sm text-(--color-no-text)">{transferError}</p>}
+                  {transferSuccess && <p className="mt-2 text-sm text-(--color-yes-text)">{transferSuccess}</p>}
+                </form>
+              )}
+            </>
           )}
 
           <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
@@ -290,7 +324,28 @@ export function Profile() {
         </div>
       )}
 
-      {tab === "profile" && (
+      {effectiveTab === "badges" && (
+        <div className="mt-5">
+          {badges.length === 0 ? (
+            <p className="mt-3 text-sm text-(--color-ink-soft)">
+              None yet — win a couple bets in a row to unlock some.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {badges.map((b) => (
+                <span
+                  key={b.label}
+                  className="rounded-full bg-(--color-surface) px-3 py-1.5 text-sm font-medium text-(--color-ink) shadow-sm shadow-black/5"
+                >
+                  {b.emoji} {b.label}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {effectiveTab === "profile" && isOwn && (
         <div className="mt-5">
           <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
             Name
@@ -302,7 +357,7 @@ export function Profile() {
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder={user.name}
+              placeholder={currentUser.name}
               className="flex-1 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
             />
             <button
@@ -327,13 +382,13 @@ export function Profile() {
               onClick={() => handlePickEmoji(null)}
               disabled={savingEmoji !== null}
               className={`flex h-9 w-9 items-center justify-center rounded-full border text-sm font-semibold transition disabled:opacity-50 ${
-                !user.avatarEmoji
+                !currentUser.avatarEmoji
                   ? "border-(--color-ink) bg-(--color-ink) text-white"
                   : "border-black/10 bg-(--color-surface) text-(--color-ink-soft) hover:text-(--color-ink)"
               }`}
               title="Use initial instead"
             >
-              {user.name.trim().charAt(0).toUpperCase() || "?"}
+              {currentUser.name.trim().charAt(0).toUpperCase() || "?"}
             </button>
             {AVATAR_EMOJI_OPTIONS.map((emoji) => (
               <button
@@ -341,7 +396,7 @@ export function Profile() {
                 onClick={() => handlePickEmoji(emoji)}
                 disabled={savingEmoji !== null}
                 className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition disabled:opacity-50 ${
-                  user.avatarEmoji === emoji
+                  currentUser.avatarEmoji === emoji
                     ? "border-(--color-ink) bg-(--color-ink)"
                     : "border-black/10 bg-(--color-surface) hover:border-black/20"
                 }`}
@@ -362,14 +417,14 @@ export function Profile() {
                 onClick={() => handlePickColor(color)}
                 disabled={savingColor !== null}
                 className={`flex h-9 w-9 items-center justify-center rounded-full ring-2 ring-offset-2 transition disabled:opacity-50 ${
-                  (user.avatarColor ?? DEFAULT_AVATAR_COLOR) === color
+                  (currentUser.avatarColor ?? DEFAULT_AVATAR_COLOR) === color
                     ? "ring-(--color-ink)"
                     : "ring-transparent"
                 }`}
                 style={{ backgroundColor: color }}
                 title={color}
               >
-                {(user.avatarColor ?? DEFAULT_AVATAR_COLOR) === color && (
+                {(currentUser.avatarColor ?? DEFAULT_AVATAR_COLOR) === color && (
                   <span className="text-sm text-white">✓</span>
                 )}
               </button>
@@ -398,27 +453,7 @@ export function Profile() {
         <p className="mt-3 text-center text-sm text-(--color-ink-soft)">{winRate}% win rate</p>
       )}
 
-      <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
-        Badges
-      </h2>
-      {badges.length === 0 ? (
-        <p className="mt-3 text-sm text-(--color-ink-soft)">
-          None yet — win a couple bets in a row to unlock some.
-        </p>
-      ) : (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {badges.map((b) => (
-            <span
-              key={b.label}
-              className="rounded-full bg-(--color-surface) px-3 py-1.5 text-sm font-medium text-(--color-ink) shadow-sm shadow-black/5"
-            >
-              {b.emoji} {b.label}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {notifPermission !== "unsupported" && (
+      {isOwn && notifPermission !== "unsupported" && (
         <>
           <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
             Notifications
@@ -444,12 +479,14 @@ export function Profile() {
         </>
       )}
 
-      <button
-        onClick={() => logout()}
-        className="mt-8 w-full rounded-xl bg-gray-100 py-2.5 font-display text-sm font-semibold text-(--color-ink) transition hover:bg-gray-200"
-      >
-        Log out
-      </button>
+      {isOwn && (
+        <button
+          onClick={() => logout()}
+          className="mt-8 w-full rounded-xl bg-gray-100 py-2.5 font-display text-sm font-semibold text-(--color-ink) transition hover:bg-gray-200"
+        >
+          Log out
+        </button>
+      )}
     </div>
   );
 }

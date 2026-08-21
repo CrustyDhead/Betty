@@ -442,10 +442,10 @@ export function BetDetail() {
             return (
               <div key={w.id} className="rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
+                  <Link to={bettor ? `/profile/${bettor.id}` : "#"} className="flex items-center gap-2.5">
                     <Avatar name={bettor?.name ?? "?"} emoji={bettor?.avatarEmoji} color={bettor?.avatarColor} />
                     <span className="text-sm font-medium text-(--color-ink)">{bettor?.name}</span>
-                  </div>
+                  </Link>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm text-(--color-ink)">{w.amount}</span>
                     <span
@@ -484,10 +484,15 @@ export function BetDetail() {
                 key={c.id}
                 className="flex items-start gap-2.5 rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5"
               >
-                <Avatar name={author?.name ?? "?"} emoji={author?.avatarEmoji} color={author?.avatarColor} />
+                <Link to={author ? `/profile/${author.id}` : "#"}>
+                  <Avatar name={author?.name ?? "?"} emoji={author?.avatarEmoji} color={author?.avatarColor} />
+                </Link>
                 <div>
                   <p className="text-sm text-(--color-ink)">
-                    <span className="font-medium">{author?.name}</span> {c.text}
+                    <Link to={author ? `/profile/${author.id}` : "#"} className="font-medium hover:underline">
+                      {author?.name}
+                    </Link>{" "}
+                    {c.text}
                   </p>
                 </div>
               </div>

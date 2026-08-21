@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { currentStreak, userWinStats } from "../lib/store";
 import { useStoreState } from "../lib/useStore";
 import { Avatar } from "../components/Avatar";
@@ -19,9 +20,10 @@ export function Leaderboard() {
 
       <div className="mt-5 space-y-2">
         {rows.map((row, i) => (
-          <div
+          <Link
             key={row.user.id}
-            className="flex items-center gap-3 rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5"
+            to={`/profile/${row.user.id}`}
+            className="flex items-center gap-3 rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5 transition hover:-translate-y-0.5 hover:shadow-md"
           >
             <span className="w-5 text-center font-display text-sm font-semibold text-(--color-ink-soft)">
               {i + 1}
@@ -46,7 +48,7 @@ export function Leaderboard() {
             <span className="font-mono text-sm font-semibold text-(--color-ink)">
               {Math.round(row.user.tokenBalance).toLocaleString()}
             </span>
-          </div>
+          </Link>
         ))}
       </div>
     </div>

@@ -51,6 +51,7 @@ export default function App() {
         <Route path="/my-bets" element={<MyBets />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/profile/:userId" element={<Profile />} />
       </Routes>
     </BrowserRouter>
   );
