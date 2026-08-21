@@ -453,10 +453,15 @@ export async function transferTokens(fromUserId: string, toUserId: string, amoun
     throw new Error("Transfer failed — nothing was sent, your balance is unchanged.");
   }
 
-  await client.from("transactions").insert([
+  const { error: logErr } = await client.from("transactions").insert([
     { user_id: fromUserId, type: "transfer", amount: -amount, counterparty_user_id: toUserId },
     { user_id: toUserId, type: "transfer", amount, counterparty_user_id: fromUserId },
   ]);
+  if (logErr) {
+    // Balances already moved for real at this point — don't roll that back
+    // over a logging failure, but don't hide it either.
+    throw new Error(`Transfer went through, but the statement entry failed to save: ${logErr.message}`);
+  }
 }
 
 // ---- Derived helpers ----
@@ -563,6 +568,20 @@ export async function resolveBet(betId: string, outcome: Side): Promise<void> {
     return voidBet(betId);
   }
 
+  // Claim the bet atomically before paying anyone out — a conditional update
+  // that only succeeds from open/locked means a double-click or a retried
+  // request can't run this payout loop twice for the same bet.
+  const { data: claimedRow, error: claimErr } = await client
+    .from("bets")
+    .update({ status: "resolved", outcome })
+    .eq("id", betId)
+    .in("status", ["open", "locked"])
+    .select()
+    .maybeSingle();
+  if (claimErr) throw new Error(claimErr.message);
+  if (!claimedRow) throw new Error("Bet already settled");
+  setState({ bets: upsertById(state.bets, mapBet(claimedRow)) });
+
   for (const w of wagers) {
     const payout = w.side === outcome ? w.amount + (w.amount / winningTotal) * losingTotal : 0;
 
@@ -591,21 +610,24 @@ export async function resolveBet(betId: string, outcome: Side): Promise<void> {
         .insert({ user_id: w.userId, type: "payout", amount: payout, bet_id: betId });
     }
   }
-
-  const { data: betRow, error: betErr } = await client
-    .from("bets")
-    .update({ status: "resolved", outcome })
-    .eq("id", betId)
-    .select()
-    .single();
-  if (betErr) throw new Error(betErr.message);
-  setState({ bets: upsertById(state.bets, mapBet(betRow)) });
 }
 
 export async function voidBet(betId: string): Promise<void> {
   const client = requireClient();
   const bet = state.bets.find((b) => b.id === betId);
   if (!bet) throw new Error("Bet not found");
+
+  // Same atomic claim as resolveBet — see the comment there.
+  const { data: claimedRow, error: claimErr } = await client
+    .from("bets")
+    .update({ status: "void" })
+    .eq("id", betId)
+    .in("status", ["open", "locked"])
+    .select()
+    .maybeSingle();
+  if (claimErr) throw new Error(claimErr.message);
+  if (!claimedRow) throw new Error("Bet already settled");
+  setState({ bets: upsertById(state.bets, mapBet(claimedRow)) });
 
   const wagers = state.wagers.filter((w) => w.betId === betId);
   for (const w of wagers) {
@@ -632,15 +654,6 @@ export async function voidBet(betId: string): Promise<void> {
       .from("transactions")
       .insert({ user_id: w.userId, type: "refund", amount: w.amount, bet_id: betId });
   }
-
-  const { data: betRow, error: betErr } = await client
-    .from("bets")
-    .update({ status: "void" })
-    .eq("id", betId)
-    .select()
-    .single();
-  if (betErr) throw new Error(betErr.message);
-  setState({ bets: upsertById(state.bets, mapBet(betRow)) });
 }
 
 // Creator-only, and only before a bet settles — once it's resolved/void the
@@ -722,6 +735,19 @@ export async function reResolve(betId: string, outcome: Side) {
     throw new Error("Only settled bets can be re-resolved");
   }
 
+  // Same atomic claim as resolveBet — flip to "locked" first so a
+  // double-click can't run the reversal loop below twice.
+  const { data: lockedRow, error: lockErr } = await client
+    .from("bets")
+    .update({ status: "locked", outcome: null })
+    .eq("id", betId)
+    .in("status", ["resolved", "void"])
+    .select()
+    .maybeSingle();
+  if (lockErr) throw new Error(lockErr.message);
+  if (!lockedRow) throw new Error("This bet is already being re-resolved");
+  setState({ bets: upsertById(state.bets, mapBet(lockedRow)) });
+
   const wagers = state.wagers.filter((w) => w.betId === betId);
   for (const w of wagers) {
     if (w.payout === null) continue;
@@ -748,15 +774,6 @@ export async function reResolve(betId: string, outcome: Side) {
       .single();
     if (!wagerErr) setState({ wagers: upsertById(state.wagers, mapWager(wagerRow)) });
   }
-
-  const { data: lockedRow, error: lockErr } = await client
-    .from("bets")
-    .update({ status: "locked", outcome: null })
-    .eq("id", betId)
-    .select()
-    .single();
-  if (lockErr) throw new Error(lockErr.message);
-  setState({ bets: upsertById(state.bets, mapBet(lockedRow)) });
 
   await resolveBet(betId, outcome);
 

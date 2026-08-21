@@ -36,6 +36,7 @@ export function BetDetail() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [resolvingEarly, setResolvingEarly] = useState(false);
+  const [settling, setSettling] = useState(false);
 
   const bet = state.bets.find((b) => b.id === id);
   if (!bet) {
@@ -75,18 +76,26 @@ export function BetDetail() {
   }
 
   async function handleResolve(outcome: Side) {
+    if (settling) return;
+    setSettling(true);
     try {
       await resolveBet(bet!.id, outcome);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSettling(false);
     }
   }
 
   async function handleReResolve(outcome: Side) {
+    if (settling) return;
+    setSettling(true);
     try {
       await reResolve(bet!.id, outcome);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSettling(false);
     }
   }
 
@@ -255,13 +264,15 @@ export function BetDetail() {
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={() => handleReResolve("yes")}
-                  className="flex-1 rounded-xl bg-(--color-yes-soft) py-3 font-display text-sm font-semibold text-(--color-yes-text) transition hover:opacity-80"
+                  disabled={settling}
+                  className="flex-1 rounded-xl bg-(--color-yes-soft) disabled:opacity-50 py-3 font-display text-sm font-semibold text-(--color-yes-text) transition hover:opacity-80"
                 >
                   Re-resolve YES
                 </button>
                 <button
                   onClick={() => handleReResolve("no")}
-                  className="flex-1 rounded-xl bg-(--color-no-soft) py-3 font-display text-sm font-semibold text-(--color-no-text) transition hover:opacity-80"
+                  disabled={settling}
+                  className="flex-1 rounded-xl bg-(--color-no-soft) disabled:opacity-50 py-3 font-display text-sm font-semibold text-(--color-no-text) transition hover:opacity-80"
                 >
                   Re-resolve NO
                 </button>
@@ -380,13 +391,15 @@ export function BetDetail() {
                 <div className="mt-3 flex gap-2">
                   <button
                     onClick={() => handleResolve("yes")}
-                    className="flex-1 rounded-xl bg-(--color-yes-soft) py-3 font-display text-sm font-semibold text-(--color-yes-text) transition hover:opacity-80"
+                    disabled={settling}
+                    className="flex-1 rounded-xl bg-(--color-yes-soft) disabled:opacity-50 py-3 font-display text-sm font-semibold text-(--color-yes-text) transition hover:opacity-80"
                   >
                     Resolve YES
                   </button>
                   <button
                     onClick={() => handleResolve("no")}
-                    className="flex-1 rounded-xl bg-(--color-no-soft) py-3 font-display text-sm font-semibold text-(--color-no-text) transition hover:opacity-80"
+                    disabled={settling}
+                    className="flex-1 rounded-xl bg-(--color-no-soft) disabled:opacity-50 py-3 font-display text-sm font-semibold text-(--color-no-text) transition hover:opacity-80"
                   >
                     Resolve NO
                   </button>
@@ -417,13 +430,15 @@ export function BetDetail() {
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => handleResolve("yes")}
-                className="flex-1 rounded-xl bg-(--color-yes-soft) py-3 font-display text-sm font-semibold text-(--color-yes-text) transition hover:opacity-80"
+                disabled={settling}
+                className="flex-1 rounded-xl bg-(--color-yes-soft) disabled:opacity-50 py-3 font-display text-sm font-semibold text-(--color-yes-text) transition hover:opacity-80"
               >
                 Resolve YES
               </button>
               <button
                 onClick={() => handleResolve("no")}
-                className="flex-1 rounded-xl bg-(--color-no-soft) py-3 font-display text-sm font-semibold text-(--color-no-text) transition hover:opacity-80"
+                disabled={settling}
+                className="flex-1 rounded-xl bg-(--color-no-soft) disabled:opacity-50 py-3 font-display text-sm font-semibold text-(--color-no-text) transition hover:opacity-80"
               >
                 Resolve NO
               </button>
