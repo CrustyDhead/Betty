@@ -351,7 +351,12 @@ async function applyWeeklyStipendIfDue(user: User, lastStipendAt: string | null)
   if (error) return; // non-critical — don't block login over a missed stipend
 
   setState({ users: upsertById(state.users, mapUser(updated)), stipendAlert: stipend });
-  await client.from("transactions").insert({ user_id: user.id, type: "stipend", amount: stipend.amount });
+  const { data: txnRow } = await client
+    .from("transactions")
+    .insert({ user_id: user.id, type: "stipend", amount: stipend.amount })
+    .select()
+    .single();
+  if (txnRow) setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 }
 
 export function clearStipendAlert() {
@@ -453,15 +458,20 @@ export async function transferTokens(fromUserId: string, toUserId: string, amoun
     throw new Error("Transfer failed — nothing was sent, your balance is unchanged.");
   }
 
-  const { error: logErr } = await client.from("transactions").insert([
-    { user_id: fromUserId, type: "transfer", amount: -amount, counterparty_user_id: toUserId },
-    { user_id: toUserId, type: "transfer", amount, counterparty_user_id: fromUserId },
-  ]);
+  const { data: txnRows, error: logErr } = await client
+    .from("transactions")
+    .insert([
+      { user_id: fromUserId, type: "transfer", amount: -amount, counterparty_user_id: toUserId },
+      { user_id: toUserId, type: "transfer", amount, counterparty_user_id: fromUserId },
+    ])
+    .select();
   if (logErr) {
     // Balances already moved for real at this point — don't roll that back
     // over a logging failure, but don't hide it either.
     throw new Error(`Transfer went through, but the statement entry failed to save: ${logErr.message}`);
   }
+  const transactions = txnRows.reduce((list, row) => upsertById(list, mapTransaction(row)), state.transactions);
+  setState({ transactions });
 }
 
 // ---- Derived helpers ----
@@ -564,10 +574,18 @@ export async function placeWager(betId: string, userId: string, side: Side, amou
     .single();
   if (userErr) throw new Error(userErr.message);
 
-  await client.from("transactions").insert({ user_id: userId, type: "wager", amount: -amount, bet_id: betId });
+  const { data: txnRow } = await client
+    .from("transactions")
+    .insert({ user_id: userId, type: "wager", amount: -amount, bet_id: betId })
+    .select()
+    .single();
 
   const wager = mapWager(wagerRow);
-  setState({ wagers: upsertById(state.wagers, wager), users: upsertById(state.users, mapUser(userRow)) });
+  setState({
+    wagers: upsertById(state.wagers, wager),
+    users: upsertById(state.users, mapUser(userRow)),
+    transactions: txnRow ? upsertById(state.transactions, mapTransaction(txnRow)) : state.transactions,
+  });
   return wager;
 }
 
@@ -622,9 +640,12 @@ export async function resolveBet(betId: string, outcome: Side): Promise<void> {
           .single();
         if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
       }
-      await client
+      const { data: txnRow } = await client
         .from("transactions")
-        .insert({ user_id: w.userId, type: "payout", amount: payout, bet_id: betId });
+        .insert({ user_id: w.userId, type: "payout", amount: payout, bet_id: betId })
+        .select()
+        .single();
+      if (txnRow) setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
     }
   }
 }
@@ -667,9 +688,12 @@ export async function voidBet(betId: string): Promise<void> {
         .single();
       if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
     }
-    await client
+    const { data: txnRow } = await client
       .from("transactions")
-      .insert({ user_id: w.userId, type: "refund", amount: w.amount, bet_id: betId });
+      .insert({ user_id: w.userId, type: "refund", amount: w.amount, bet_id: betId })
+      .select()
+      .single();
+    if (txnRow) setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
   }
 }
 
@@ -699,9 +723,12 @@ export async function deleteBet(betId: string, requestingUserId: string): Promis
         .single();
       if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
     }
-    await client
+    const { data: txnRow } = await client
       .from("transactions")
-      .insert({ user_id: w.userId, type: "refund", amount: w.amount, bet_id: betId });
+      .insert({ user_id: w.userId, type: "refund", amount: w.amount, bet_id: betId })
+      .select()
+      .single();
+    if (txnRow) setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
   }
 
   const { error: deleteErr } = await client.from("bets").delete().eq("id", betId);
@@ -779,9 +806,12 @@ export async function reResolve(betId: string, outcome: Side) {
         .single();
       if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
     }
-    await client
+    const { data: txnRow } = await client
       .from("transactions")
-      .insert({ user_id: w.userId, type: "refund", amount: -w.payout, bet_id: betId });
+      .insert({ user_id: w.userId, type: "refund", amount: -w.payout, bet_id: betId })
+      .select()
+      .single();
+    if (txnRow) setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 
     const { data: wagerRow, error: wagerErr } = await client
       .from("wagers")
