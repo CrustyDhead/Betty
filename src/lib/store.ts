@@ -122,9 +122,40 @@ function removeById<T extends { id: string }>(list: T[], id: string) {
   return list.filter((x) => x.id !== id);
 }
 
-// ---- Init: initial fetch + realtime sync ----
+// ---- Init: initial fetch + live sync ----
+//
+// postgres_changes realtime events never arrived in testing (channel
+// reports SUBSCRIBED, table is correctly in the supabase_realtime
+// publication, RLS is fully permissive, tried both the new publishable key
+// and the legacy JWT anon key — still nothing). Root cause is unconfirmed
+// and looks project/server-side, outside what's debuggable from the
+// client. Rather than block on that, this polls + refetches on tab focus
+// as a reliable fallback; the realtime subscription is left in place in
+// case it starts working, but nothing depends on it.
 
 let initialized = false;
+const POLL_INTERVAL_MS = 15_000;
+
+async function fetchAll() {
+  const client = requireClient();
+  const [users, bets, wagers, transactions, comments] = await Promise.all([
+    client.from("users").select("*"),
+    client.from("bets").select("*").order("created_at", { ascending: false }),
+    client.from("wagers").select("*"),
+    client.from("transactions").select("*"),
+    client.from("comments").select("*").order("created_at", { ascending: true }),
+  ]);
+  const firstError = [users, bets, wagers, transactions, comments].find((r) => r.error)?.error;
+  if (firstError) throw new Error(firstError.message);
+
+  setState({
+    users: (users.data ?? []).map(mapUser),
+    bets: (bets.data ?? []).map(mapBet),
+    wagers: (wagers.data ?? []).map(mapWager),
+    transactions: (transactions.data ?? []).map(mapTransaction),
+    comments: (comments.data ?? []).map(mapComment),
+  });
+}
 
 export async function initStore() {
   if (initialized) return;
@@ -132,24 +163,8 @@ export async function initStore() {
   const client = requireClient();
 
   try {
-    const [users, bets, wagers, transactions, comments] = await Promise.all([
-      client.from("users").select("*"),
-      client.from("bets").select("*").order("created_at", { ascending: false }),
-      client.from("wagers").select("*"),
-      client.from("transactions").select("*"),
-      client.from("comments").select("*").order("created_at", { ascending: true }),
-    ]);
-    const firstError = [users, bets, wagers, transactions, comments].find((r) => r.error)?.error;
-    if (firstError) throw new Error(firstError.message);
-
-    setState({
-      users: (users.data ?? []).map(mapUser),
-      bets: (bets.data ?? []).map(mapBet),
-      wagers: (wagers.data ?? []).map(mapWager),
-      transactions: (transactions.data ?? []).map(mapTransaction),
-      comments: (comments.data ?? []).map(mapComment),
-      loading: false,
-    });
+    await fetchAll();
+    setState({ loading: false });
   } catch (err) {
     setState({ loading: false, error: err instanceof Error ? err.message : "Failed to load" });
     return;
@@ -173,6 +188,16 @@ export async function initStore() {
       applyChange(payload, "comments", mapComment),
     )
     .subscribe();
+
+  setInterval(() => {
+    fetchAll().catch(() => {});
+  }, POLL_INTERVAL_MS);
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") fetchAll().catch(() => {});
+    });
+  }
 }
 
 function applyChange<K extends "users" | "bets" | "wagers" | "transactions" | "comments">(
