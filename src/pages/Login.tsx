@@ -36,7 +36,7 @@ export function Login() {
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-2xl bg-(--color-surface) p-8 shadow-sm shadow-black/5"
       >
-        <h1 className="font-display text-2xl font-semibold text-(--color-ink)">Office Bets</h1>
+        <h1 className="font-display text-2xl font-semibold text-(--color-ink)">MizuHeng888</h1>
         <p className="mt-1 text-sm text-(--color-ink-soft)">
           No real money. Pure bragging rights.
         </p>
