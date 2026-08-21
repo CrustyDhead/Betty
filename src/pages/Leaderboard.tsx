@@ -26,7 +26,7 @@ export function Leaderboard() {
             <span className="w-5 text-center font-display text-sm font-semibold text-(--color-ink-soft)">
               {i + 1}
             </span>
-            <Avatar name={row.user.name} emoji={row.user.avatarEmoji} />
+            <Avatar name={row.user.name} emoji={row.user.avatarEmoji} color={row.user.avatarColor} />
             <div className="flex-1">
               <p className="flex items-center gap-1.5 text-sm font-medium text-(--color-ink)">
                 {row.user.name}

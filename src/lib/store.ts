@@ -81,6 +81,7 @@ function mapUser(row: Row): User {
     name: row.name,
     tokenBalance: Number(row.token_balance),
     avatarEmoji: row.avatar_emoji ?? null,
+    avatarColor: row.avatar_color ?? null,
   };
 }
 function mapBet(row: Row): Bet {
@@ -354,6 +355,18 @@ export async function setAvatarEmoji(userId: string, emoji: string | null) {
   const { data, error } = await client
     .from("users")
     .update({ avatar_emoji: emoji })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  setState({ users: upsertById(state.users, mapUser(data)) });
+}
+
+export async function setAvatarColor(userId: string, color: string | null) {
+  const client = requireClient();
+  const { data, error } = await client
+    .from("users")
+    .update({ avatar_color: color })
     .eq("id", userId)
     .select()
     .single();

@@ -174,7 +174,14 @@ export function BetDetail() {
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            {subjectName && <Avatar name={subjectName} emoji={subject?.avatarEmoji} size="md" />}
+            {subjectName && (
+              <Avatar
+                name={subjectName}
+                emoji={subject?.avatarEmoji}
+                color={subject?.avatarColor}
+                size="md"
+              />
+            )}
             <div>
               <h1 className="font-display text-xl font-semibold leading-snug text-(--color-ink)">
                 {bet.title}
@@ -429,7 +436,7 @@ export function BetDetail() {
               <div key={w.id} className="rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
-                    <Avatar name={bettor?.name ?? "?"} emoji={bettor?.avatarEmoji} />
+                    <Avatar name={bettor?.name ?? "?"} emoji={bettor?.avatarEmoji} color={bettor?.avatarColor} />
                     <span className="text-sm font-medium text-(--color-ink)">{bettor?.name}</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -470,7 +477,7 @@ export function BetDetail() {
                 key={c.id}
                 className="flex items-start gap-2.5 rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5"
               >
-                <Avatar name={author?.name ?? "?"} emoji={author?.avatarEmoji} />
+                <Avatar name={author?.name ?? "?"} emoji={author?.avatarEmoji} color={author?.avatarColor} />
                 <div>
                   <p className="text-sm text-(--color-ink)">
                     <span className="font-medium">{author?.name}</span> {c.text}

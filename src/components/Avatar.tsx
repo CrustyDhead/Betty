@@ -1,10 +1,14 @@
+import { DEFAULT_AVATAR_COLOR } from "../lib/avatars";
+
 export function Avatar({
   name,
   emoji,
+  color,
   size = "sm",
 }: {
   name: string;
   emoji?: string | null;
+  color?: string | null;
   size?: "sm" | "md";
 }) {
   const initial = name.trim().charAt(0).toUpperCase() || "?";
@@ -13,7 +17,8 @@ export function Avatar({
 
   return (
     <div
-      className={`flex ${dims} ${textSize} shrink-0 items-center justify-center rounded-full bg-(--color-ink) font-display font-semibold text-white`}
+      className={`flex ${dims} ${textSize} shrink-0 items-center justify-center rounded-full font-display font-semibold text-white`}
+      style={{ backgroundColor: color || DEFAULT_AVATAR_COLOR }}
       title={name}
     >
       {emoji || initial}

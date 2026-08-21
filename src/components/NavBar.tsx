@@ -48,7 +48,7 @@ export function NavBar() {
               className="rounded-full p-0.5 transition hover:opacity-70"
               title={`${user.name}'s profile`}
             >
-              <Avatar name={user.name} emoji={user.avatarEmoji} />
+              <Avatar name={user.name} emoji={user.avatarEmoji} color={user.avatarColor} />
             </NavLink>
           </div>
         )}

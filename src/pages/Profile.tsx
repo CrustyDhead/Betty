@@ -4,18 +4,21 @@ import {
   logout,
   notificationPermission,
   requestNotificationPermission,
+  setAvatarColor,
   setAvatarEmoji,
   userWinStats,
 } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { Avatar } from "../components/Avatar";
-import { AVATAR_EMOJI_OPTIONS } from "../lib/avatars";
+import { AVATAR_COLOR_OPTIONS, AVATAR_EMOJI_OPTIONS, DEFAULT_AVATAR_COLOR } from "../lib/avatars";
 
 export function Profile() {
   const user = useCurrentUser();
   useStoreState();
   const [savingEmoji, setSavingEmoji] = useState<string | null>(null);
   const [emojiError, setEmojiError] = useState<string | null>(null);
+  const [savingColor, setSavingColor] = useState<string | null>(null);
+  const [colorError, setColorError] = useState<string | null>(null);
   const [notifPermission, setNotifPermission] = useState(notificationPermission());
 
   async function handleEnableNotifications() {
@@ -52,12 +55,25 @@ export function Profile() {
     }
   }
 
+  async function handlePickColor(color: string | null) {
+    if (!user) return;
+    setSavingColor(color ?? "__reset__");
+    setColorError(null);
+    try {
+      await setAvatarColor(user.id, color);
+    } catch (err) {
+      setColorError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSavingColor(null);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <h1 className="font-display text-xl font-semibold text-(--color-ink)">Profile</h1>
 
       <div className="mt-5 flex items-center gap-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
-        <Avatar name={user.name} emoji={user.avatarEmoji} size="md" />
+        <Avatar name={user.name} emoji={user.avatarEmoji} color={user.avatarColor} size="md" />
         <div>
           <p className="font-display text-lg font-semibold text-(--color-ink)">{user.name}</p>
           <p className="font-mono text-sm text-(--color-ink-soft)">
@@ -98,6 +114,31 @@ export function Profile() {
         ))}
       </div>
       {emojiError && <p className="mt-2 text-sm text-(--color-no-text)">{emojiError}</p>}
+
+      <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+        Avatar color
+      </h2>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {AVATAR_COLOR_OPTIONS.map((color) => (
+          <button
+            key={color}
+            onClick={() => handlePickColor(color)}
+            disabled={savingColor !== null}
+            className={`flex h-9 w-9 items-center justify-center rounded-full ring-2 ring-offset-2 transition disabled:opacity-50 ${
+              (user.avatarColor ?? DEFAULT_AVATAR_COLOR) === color
+                ? "ring-(--color-ink)"
+                : "ring-transparent"
+            }`}
+            style={{ backgroundColor: color }}
+            title={color}
+          >
+            {(user.avatarColor ?? DEFAULT_AVATAR_COLOR) === color && (
+              <span className="text-sm text-white">✓</span>
+            )}
+          </button>
+        ))}
+      </div>
+      {colorError && <p className="mt-2 text-sm text-(--color-no-text)">{colorError}</p>}
 
       <div className="mt-4 grid grid-cols-3 gap-3">
         <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
