@@ -5,14 +5,31 @@ import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { CATEGORIES, CATEGORY_EMOJI } from "../lib/categories";
 import type { BetCategory } from "../types";
 
-function defaultLockTime() {
+function toLocalDateTimeValue(d: Date) {
   // datetime-local inputs read/write local wall-clock time, not UTC — build
   // the string from local components so it round-trips through new Date()
   // to the same instant regardless of timezone.
-  const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+function defaultLockTime() {
+  return toLocalDateTimeValue(new Date(Date.now() + 4 * 60 * 60 * 1000));
+}
+
+// "Will X happen today?" bets read better locking at end-of-workday than a
+// flat +4h — falls back to the usual default if it's already past that.
+function endOfWorkdayLockTime() {
+  const target = new Date();
+  target.setHours(18, 0, 0, 0);
+  return target.getTime() > Date.now() ? toLocalDateTimeValue(target) : defaultLockTime();
+}
+
+const QUICK_TEMPLATES: { category: BetCategory; emoji: string; label: string; question: (name: string) => string }[] = [
+  { category: "WFH", emoji: "🏠", label: "WFH today?", question: (name) => `Will ${name} WFH today?` },
+  { category: "Sick", emoji: "🤒", label: "Out sick?", question: (name) => `Will ${name} call in sick today?` },
+  { category: "Late", emoji: "⏰", label: "Late today?", question: (name) => `Will ${name} be late today?` },
+];
 
 export function CreateBet() {
   const navigate = useNavigate();
@@ -26,6 +43,35 @@ export function CreateBet() {
   const [category, setCategory] = useState<BetCategory>("WFH");
   const [lockTime, setLockTime] = useState(defaultLockTime());
   const [error, setError] = useState<string | null>(null);
+  const [activeTemplate, setActiveTemplate] = useState<(typeof QUICK_TEMPLATES)[number] | null>(null);
+
+  function subjectDisplayName(id: string, freeTextName: string) {
+    if (id === "__other__") return freeTextName.trim();
+    return state.users.find((u) => u.id === id)?.name ?? "";
+  }
+
+  function applyTemplate(tpl: (typeof QUICK_TEMPLATES)[number]) {
+    setActiveTemplate(tpl);
+    setCategory(tpl.category);
+    setLockTime(endOfWorkdayLockTime());
+    const name = subjectDisplayName(subjectUserId, subjectName);
+    setTitle(tpl.question(name || "___"));
+  }
+
+  function handleSubjectChange(id: string) {
+    setSubjectUserId(id);
+    if (activeTemplate && id !== "__other__") {
+      const name = subjectDisplayName(id, subjectName);
+      if (name) setTitle(activeTemplate.question(name));
+    }
+  }
+
+  function handleSubjectNameChange(name: string) {
+    setSubjectName(name);
+    if (activeTemplate && subjectUserId === "__other__" && name.trim()) {
+      setTitle(activeTemplate.question(name.trim()));
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -60,15 +106,41 @@ export function CreateBet() {
     <div className="mx-auto max-w-2xl px-4 py-6">
       <h1 className="font-display text-xl font-semibold text-(--color-ink)">Create a bet</h1>
 
+      <div className="mt-5 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
+        <p className="text-sm font-medium text-(--color-ink)">Quick start</p>
+        <p className="mt-0.5 text-xs text-(--color-ink-soft)">
+          Tap one, then pick who it's about below — everything else fills in for you.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {QUICK_TEMPLATES.map((tpl) => (
+            <button
+              key={tpl.category}
+              type="button"
+              onClick={() => applyTemplate(tpl)}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                activeTemplate?.category === tpl.category
+                  ? "bg-(--color-ink) text-white"
+                  : "bg-(--color-bg) text-(--color-ink-soft) hover:text-(--color-ink)"
+              }`}
+            >
+              {tpl.emoji} {tpl.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <form
         onSubmit={handleSubmit}
-        className="mt-5 space-y-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5"
+        className="mt-4 space-y-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5"
       >
         <label className="block text-sm font-medium text-(--color-ink)">
           Title
           <input
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setActiveTemplate(null);
+            }}
             placeholder="Will Nat WFH before 10am?"
             className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
           />
@@ -109,7 +181,7 @@ export function CreateBet() {
           Subject <span className="font-normal text-(--color-ink-soft)">(who's this about?)</span>
           <select
             value={subjectUserId}
-            onChange={(e) => setSubjectUserId(e.target.value)}
+            onChange={(e) => handleSubjectChange(e.target.value)}
             className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
           >
             <option value="">Nobody in particular</option>
@@ -127,7 +199,7 @@ export function CreateBet() {
             Their name
             <input
               value={subjectName}
-              onChange={(e) => setSubjectName(e.target.value)}
+              onChange={(e) => handleSubjectNameChange(e.target.value)}
               placeholder="e.g. Ploy"
               className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
             />
