@@ -26,7 +26,10 @@ export function BetDetail() {
   const state = useStoreState();
   const user = useCurrentUser();
 
-  const [side, setSide] = useState<Side>("yes");
+  // null = no explicit choice yet — defaults to whichever side the user is
+  // already on, instead of always starting the toggle at YES regardless of
+  // an existing position.
+  const [sideOverride, setSideOverride] = useState<Side | null>(null);
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
@@ -52,6 +55,7 @@ export function BetDetail() {
   const subjectName = subject?.name ?? bet.subjectName;
   const creator = state.users.find((u) => u.id === bet.creatorId);
   const position = user ? userPosition(bet.id, user.id) : null;
+  const side: Side = sideOverride ?? position?.side ?? "yes";
 
   async function submitWager(e: FormEvent) {
     e.preventDefault();
@@ -261,7 +265,7 @@ export function BetDetail() {
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setSide("yes")}
+                onClick={() => setSideOverride("yes")}
                 className={`flex-1 rounded-xl py-3 font-display text-sm font-semibold transition ${
                   side === "yes"
                     ? "bg-(--color-yes-text) text-white"
@@ -272,7 +276,7 @@ export function BetDetail() {
               </button>
               <button
                 type="button"
-                onClick={() => setSide("no")}
+                onClick={() => setSideOverride("no")}
                 className={`flex-1 rounded-xl py-3 font-display text-sm font-semibold transition ${
                   side === "no" ? "bg-(--color-no-text) text-white" : "bg-(--color-no-soft) text-(--color-no-text)"
                 }`}
@@ -297,9 +301,9 @@ export function BetDetail() {
                 Wager
               </button>
             </div>
-            {Number(amount) > 0 &&
+            {(Number(amount) > 0 || position) &&
               (() => {
-                const amt = Number(amount);
+                const amt = Number(amount) || 0;
                 const currentSideTotal = side === "yes" ? yes : no;
                 const otherSideTotal = side === "yes" ? no : yes;
                 const otherSide = side === "yes" ? "NO" : "YES";
@@ -315,19 +319,27 @@ export function BetDetail() {
 
                 return (
                   <div className="mt-2 space-y-1 text-xs text-(--color-ink-soft)">
-                    <p>
-                      You're risking{" "}
-                      <span className="font-mono font-medium text-(--color-no-text)">{amt}</span> tokens —
-                      gone for good if {otherSide} wins.
-                    </p>
+                    {amt > 0 && (
+                      <p>
+                        You're risking{" "}
+                        <span className="font-mono font-medium text-(--color-no-text)">{amt}</span> tokens
+                        — gone for good if {otherSide} wins.
+                      </p>
+                    )}
+                    {existingOnSide > 0 && (
+                      <p>
+                        You already have {existingOnSide} tokens on {side.toUpperCase()}
+                        {amt > 0 ? " — this adds to it." : "."}
+                      </p>
+                    )}
                     {potentialPayout !== null ? (
                       <p>
                         If {side.toUpperCase()} wins: you'd get back{" "}
                         <span className="font-mono font-medium text-(--color-yes-text)">
                           {Math.round(potentialPayout)}
                         </span>{" "}
-                        tokens (+{Math.round(profit!)} profit) at today's odds — this shifts as more
-                        people bet.
+                        tokens{yourStakeOnSide !== amt ? " total" : ""} (+{Math.round(profit!)} profit) at
+                        today's odds — this shifts as more people bet.
                       </p>
                     ) : (
                       <p>
@@ -338,12 +350,6 @@ export function BetDetail() {
                   </div>
                 );
               })()}
-            {position && (
-              <p className="mt-2 text-xs text-(--color-ink-soft)">
-                You already have {position.amount} tokens on {position.side.toUpperCase()} — this adds
-                to it.
-              </p>
-            )}
           </form>
         )}
 
