@@ -145,6 +145,7 @@ export function Profile() {
               value={transferAmount}
               onChange={(e) => setTransferAmount(e.target.value)}
               type="number"
+              step="any"
               inputMode="numeric"
               placeholder="Amount"
               className="w-28 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 font-mono text-sm outline-none focus:border-(--color-yes-text)"

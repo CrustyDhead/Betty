@@ -290,6 +290,7 @@ export function BetDetail() {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 type="number"
+                step="any"
                 inputMode="numeric"
                 placeholder={`Min ${MIN_WAGER}`}
                 className="flex-1 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-3 font-mono text-sm outline-none focus:border-(--color-yes-text)"

@@ -382,7 +382,7 @@ export async function setAvatarColor(userId: string, color: string | null) {
 
 export async function transferTokens(fromUserId: string, toUserId: string, amount: number) {
   if (fromUserId === toUserId) throw new Error("Can't send tokens to yourself");
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a positive amount");
+  if (!Number.isInteger(amount) || amount <= 0) throw new Error("Enter a whole positive number of tokens");
 
   const sender = state.users.find((u) => u.id === fromUserId);
   const receiver = state.users.find((u) => u.id === toUserId);
@@ -401,14 +401,33 @@ export async function transferTokens(fromUserId: string, toUserId: string, amoun
   if (senderErr) throw new Error(senderErr.message);
   setState({ users: upsertById(state.users, mapUser(senderRow)) });
 
-  const { data: receiverRow, error: receiverErr } = await client
-    .from("users")
-    .update({ token_balance: receiver.tokenBalance + amount })
-    .eq("id", toUserId)
-    .select()
-    .single();
-  if (receiverErr) throw new Error(receiverErr.message);
-  setState({ users: upsertById(state.users, mapUser(receiverRow)) });
+  try {
+    const { data: receiverRow, error: receiverErr } = await client
+      .from("users")
+      .update({ token_balance: receiver.tokenBalance + amount })
+      .eq("id", toUserId)
+      .select()
+      .single();
+    if (receiverErr) throw new Error(receiverErr.message);
+    setState({ users: upsertById(state.users, mapUser(receiverRow)) });
+  } catch {
+    // The sender was already debited — without this, a failure here would
+    // silently destroy tokens (charged, nobody credited). Best-effort
+    // compensating write to put the sender back where they started.
+    const { data: refundRow, error: refundErr } = await client
+      .from("users")
+      .update({ token_balance: sender.tokenBalance })
+      .eq("id", fromUserId)
+      .select()
+      .single();
+    if (refundErr) {
+      throw new Error(
+        "Transfer failed partway through and the automatic refund also failed — check your balance.",
+      );
+    }
+    setState({ users: upsertById(state.users, mapUser(refundRow)) });
+    throw new Error("Transfer failed — nothing was sent, your balance is unchanged.");
+  }
 
   await client.from("transactions").insert([
     { user_id: fromUserId, type: "transfer", amount: -amount },
@@ -475,7 +494,9 @@ export async function placeWager(betId: string, userId: string, side: Side, amou
   if (!bet) throw new Error("Bet not found");
   if (!user) throw new Error("User not found");
   if (effectiveStatus(bet) !== "open") throw new Error("Bet is no longer accepting wagers");
-  if (amount < MIN_WAGER) throw new Error(`Minimum wager is ${MIN_WAGER} tokens`);
+  if (!Number.isInteger(amount) || amount < MIN_WAGER) {
+    throw new Error(`Wagers must be a whole number of at least ${MIN_WAGER} tokens`);
+  }
   if (amount > user.tokenBalance) throw new Error("Insufficient balance");
 
   const existing = userPosition(betId, userId);
