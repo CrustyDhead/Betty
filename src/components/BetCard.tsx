@@ -17,6 +17,7 @@ const STATUS_LABEL: Record<string, string> = {
 export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: string | null }) {
   const state = useStoreState();
   const subject = bet.subjectUserId ? state.users.find((u) => u.id === bet.subjectUserId) : null;
+  const subjectName = subject?.name ?? bet.subjectName;
   const { yes, no, total, wagers } = betTotals(bet.id);
   const status = effectiveStatus(bet);
   const position = currentUserId ? userPosition(bet.id, currentUserId) : null;
@@ -28,14 +29,14 @@ export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: strin
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          {subject && <Avatar name={subject.name} />}
+          {subjectName && <Avatar name={subjectName} />}
           <div>
             <h3 className="font-display text-base font-semibold leading-snug text-(--color-ink)">
               {bet.title}
             </h3>
             <p className="text-xs text-(--color-ink-soft)">
               {CATEGORY_EMOJI[bet.category]} {bet.category}
-              {subject ? ` · about ${subject.name}` : ""}
+              {subjectName ? ` · about ${subjectName}` : ""}
             </p>
           </div>
         </div>
@@ -65,8 +66,8 @@ export function BetCard({ bet, currentUserId }: { bet: Bet; currentUserId: strin
           <span
             className={`rounded-full px-2.5 py-1 text-xs font-medium ${
               position.side === "yes"
-                ? "bg-(--color-yes-soft) text-(--color-yes)"
-                : "bg-(--color-no-soft) text-(--color-no)"
+                ? "bg-(--color-yes-soft) text-(--color-yes-text)"
+                : "bg-(--color-no-soft) text-(--color-no-text)"
             }`}
           >
             You: {position.amount} {position.side.toUpperCase()}

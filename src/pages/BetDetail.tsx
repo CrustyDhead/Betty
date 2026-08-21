@@ -38,7 +38,7 @@ export function BetDetail() {
     return (
       <div className="mx-auto max-w-2xl px-4 py-10 text-center">
         <p className="text-(--color-ink-soft)">Bet not found.</p>
-        <Link to="/" className="mt-3 inline-block text-sm font-medium text-(--color-yes)">
+        <Link to="/" className="mt-3 inline-block text-sm font-medium text-(--color-yes-text)">
           Back to feed
         </Link>
       </div>
@@ -48,6 +48,7 @@ export function BetDetail() {
   const status = effectiveStatus(bet);
   const { yes, no, total, wagers } = betTotals(bet.id);
   const subject = bet.subjectUserId ? state.users.find((u) => u.id === bet.subjectUserId) : null;
+  const subjectName = subject?.name ?? bet.subjectName;
   const creator = state.users.find((u) => u.id === bet.creatorId);
   const position = user ? userPosition(bet.id, user.id) : null;
 
@@ -139,7 +140,7 @@ export function BetDetail() {
                   <button
                     onClick={handleDelete}
                     disabled={deleting}
-                    className="rounded-full bg-(--color-no) px-2.5 py-1 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                    className="rounded-full bg-(--color-no-text) px-2.5 py-1 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
                   >
                     {deleting ? "Deleting…" : "Confirm"}
                   </button>
@@ -154,7 +155,7 @@ export function BetDetail() {
               ) : (
                 <button
                   onClick={() => setConfirmingDelete(true)}
-                  className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-(--color-ink-soft) transition hover:bg-(--color-no-soft) hover:text-(--color-no)"
+                  className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-(--color-ink-soft) transition hover:bg-(--color-no-soft) hover:text-(--color-no-text)"
                 >
                   Delete
                 </button>
@@ -166,20 +167,20 @@ export function BetDetail() {
       </div>
 
       {error && (
-        <p className="mt-3 rounded-xl bg-(--color-no-soft) px-4 py-2.5 text-sm text-(--color-no)">{error}</p>
+        <p className="mt-3 rounded-xl bg-(--color-no-soft) px-4 py-2.5 text-sm text-(--color-no-text)">{error}</p>
       )}
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            {subject && <Avatar name={subject.name} size="md" />}
+            {subjectName && <Avatar name={subjectName} size="md" />}
             <div>
               <h1 className="font-display text-xl font-semibold leading-snug text-(--color-ink)">
                 {bet.title}
               </h1>
               <p className="text-xs text-(--color-ink-soft)">
                 {CATEGORY_EMOJI[bet.category]} {bet.category} ·{" "}
-                {subject ? `about ${subject.name} · ` : ""}created by {creator?.name ?? "?"}
+                {subjectName ? `about ${subjectName} · ` : ""}created by {creator?.name ?? "?"}
               </p>
             </div>
           </div>
@@ -204,7 +205,7 @@ export function BetDetail() {
 
         {status === "resolved" && (
           <div className="mt-4 rounded-xl bg-(--color-yes-soft) px-4 py-3 text-sm font-medium text-(--color-ink)">
-            Resolved: <span className="uppercase text-(--color-yes)">{bet.outcome}</span> won
+            Resolved: <span className="uppercase text-(--color-yes-text)">{bet.outcome}</span> won
           </div>
         )}
         {status === "void" && (
@@ -216,7 +217,7 @@ export function BetDetail() {
         {(status === "resolved" || status === "void") && user && !bet.disputed && (
           <button
             onClick={() => handleFlagDispute()}
-            className="mt-3 text-xs font-medium text-(--color-ink-soft) underline decoration-dotted hover:text-(--color-no)"
+            className="mt-3 text-xs font-medium text-(--color-ink-soft) underline decoration-dotted hover:text-(--color-no-text)"
           >
             Something's off — flag this resolution
           </button>
@@ -232,13 +233,13 @@ export function BetDetail() {
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={() => handleReResolve("yes")}
-                  className="flex-1 rounded-xl bg-(--color-yes-soft) py-2 font-display text-sm font-semibold text-(--color-yes) transition hover:opacity-80"
+                  className="flex-1 rounded-xl bg-(--color-yes-soft) py-3 font-display text-sm font-semibold text-(--color-yes-text) transition hover:opacity-80"
                 >
                   Re-resolve YES
                 </button>
                 <button
                   onClick={() => handleReResolve("no")}
-                  className="flex-1 rounded-xl bg-(--color-no-soft) py-2 font-display text-sm font-semibold text-(--color-no) transition hover:opacity-80"
+                  className="flex-1 rounded-xl bg-(--color-no-soft) py-3 font-display text-sm font-semibold text-(--color-no-text) transition hover:opacity-80"
                 >
                   Re-resolve NO
                 </button>
@@ -253,10 +254,10 @@ export function BetDetail() {
               <button
                 type="button"
                 onClick={() => setSide("yes")}
-                className={`flex-1 rounded-xl py-2.5 font-display text-sm font-semibold transition ${
+                className={`flex-1 rounded-xl py-3 font-display text-sm font-semibold transition ${
                   side === "yes"
-                    ? "bg-(--color-yes) text-white"
-                    : "bg-(--color-yes-soft) text-(--color-yes)"
+                    ? "bg-(--color-yes-text) text-white"
+                    : "bg-(--color-yes-soft) text-(--color-yes-text)"
                 }`}
               >
                 YES
@@ -264,8 +265,8 @@ export function BetDetail() {
               <button
                 type="button"
                 onClick={() => setSide("no")}
-                className={`flex-1 rounded-xl py-2.5 font-display text-sm font-semibold transition ${
-                  side === "no" ? "bg-(--color-no) text-white" : "bg-(--color-no-soft) text-(--color-no)"
+                className={`flex-1 rounded-xl py-3 font-display text-sm font-semibold transition ${
+                  side === "no" ? "bg-(--color-no-text) text-white" : "bg-(--color-no-soft) text-(--color-no-text)"
                 }`}
               >
                 NO
@@ -277,20 +278,20 @@ export function BetDetail() {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 type="number"
-                min={MIN_WAGER}
+                inputMode="numeric"
                 placeholder={`Min ${MIN_WAGER}`}
-                className="flex-1 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 font-mono text-sm outline-none focus:border-(--color-yes)"
+                className="flex-1 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-3 font-mono text-sm outline-none focus:border-(--color-yes-text)"
               />
               <button
                 type="submit"
-                className="rounded-xl bg-(--color-ink) px-5 py-2.5 font-display text-sm font-semibold text-white transition hover:opacity-90"
+                className="rounded-xl bg-(--color-ink) px-5 py-3 font-display text-sm font-semibold text-white transition hover:opacity-90"
               >
                 Wager
               </button>
             </div>
             {Number(amount) > 0 && (
               <p className="mt-2 text-xs text-(--color-ink-soft)">
-                You're risking <span className="font-mono font-medium text-(--color-no)">{amount}</span>{" "}
+                You're risking <span className="font-mono font-medium text-(--color-no-text)">{amount}</span>{" "}
                 tokens — gone for good if {side === "yes" ? "NO" : "YES"} wins.
               </p>
             )}
@@ -311,13 +312,13 @@ export function BetDetail() {
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => handleResolve("yes")}
-                className="flex-1 rounded-xl bg-(--color-yes-soft) py-2.5 font-display text-sm font-semibold text-(--color-yes) transition hover:opacity-80"
+                className="flex-1 rounded-xl bg-(--color-yes-soft) py-3 font-display text-sm font-semibold text-(--color-yes-text) transition hover:opacity-80"
               >
                 Resolve YES
               </button>
               <button
                 onClick={() => handleResolve("no")}
-                className="flex-1 rounded-xl bg-(--color-no-soft) py-2.5 font-display text-sm font-semibold text-(--color-no) transition hover:opacity-80"
+                className="flex-1 rounded-xl bg-(--color-no-soft) py-3 font-display text-sm font-semibold text-(--color-no-text) transition hover:opacity-80"
               >
                 Resolve NO
               </button>
@@ -361,8 +362,8 @@ export function BetDetail() {
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                         w.side === "yes"
-                          ? "bg-(--color-yes-soft) text-(--color-yes)"
-                          : "bg-(--color-no-soft) text-(--color-no)"
+                          ? "bg-(--color-yes-soft) text-(--color-yes-text)"
+                          : "bg-(--color-no-soft) text-(--color-no-text)"
                       }`}
                     >
                       {w.side.toUpperCase()}
@@ -372,7 +373,7 @@ export function BetDetail() {
                     )}
                   </div>
                 </div>
-                {nearMiss && <p className="mt-1.5 pl-9 text-xs text-(--color-no)">{nearMiss}</p>}
+                {nearMiss && <p className="mt-1.5 pl-9 text-xs text-(--color-no-text)">{nearMiss}</p>}
               </div>
             );
           })}
@@ -411,7 +412,7 @@ export function BetDetail() {
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
               placeholder="Add a comment"
-              className="flex-1 rounded-xl border border-black/10 bg-(--color-surface) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes)"
+              className="flex-1 rounded-xl border border-black/10 bg-(--color-surface) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
             />
             <button
               type="submit"

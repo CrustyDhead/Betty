@@ -1,4 +1,4 @@
-import { currentStreak } from "../lib/store";
+import { currentStreak, userWinStats } from "../lib/store";
 import { useStoreState } from "../lib/useStore";
 import { Avatar } from "../components/Avatar";
 
@@ -7,10 +7,9 @@ export function Leaderboard() {
 
   const rows = state.users
     .map((user) => {
-      const settled = state.wagers.filter((w) => w.userId === user.id && w.payout !== null);
-      const wins = settled.filter((w) => w.payout! > w.amount).length;
-      const winRate = settled.length > 0 ? Math.round((wins / settled.length) * 100) : null;
-      return { user, winRate, settledCount: settled.length, streak: currentStreak(user.id) };
+      const { settledCount, wins } = userWinStats(user.id);
+      const winRate = settledCount > 0 ? Math.round((wins / settledCount) * 100) : null;
+      return { user, winRate, settledCount, streak: currentStreak(user.id) };
     })
     .sort((a, b) => b.user.tokenBalance - a.user.tokenBalance);
 
@@ -33,7 +32,7 @@ export function Leaderboard() {
                 {row.user.name}
                 {row.streak.kind === "win" && row.streak.streak >= 2 && (
                   <span
-                    className="rounded-full bg-(--color-yes-soft) px-2 py-0.5 text-xs font-semibold text-(--color-yes)"
+                    className="rounded-full bg-(--color-yes-soft) px-2 py-0.5 text-xs font-semibold text-(--color-yes-text)"
                     title={`${row.streak.streak} correct calls in a row`}
                   >
                     🔥 {row.streak.streak}

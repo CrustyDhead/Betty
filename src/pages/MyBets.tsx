@@ -32,7 +32,7 @@ export function MyBets() {
           <p className="text-xs text-(--color-ink-soft)">Net P/L (settled)</p>
           <p
             className={`mt-1 font-mono text-lg font-semibold ${
-              netPL > 0 ? "text-(--color-yes)" : netPL < 0 ? "text-(--color-no)" : "text-(--color-ink)"
+              netPL > 0 ? "text-(--color-yes-text)" : netPL < 0 ? "text-(--color-no-text)" : "text-(--color-ink)"
             }`}
           >
             {netPL > 0 ? "+" : ""}
@@ -44,7 +44,7 @@ export function MyBets() {
       {rows.length === 0 ? (
         <p className="mt-10 text-center text-sm text-(--color-ink-soft)">
           No wagers yet.{" "}
-          <Link to="/" className="font-medium text-(--color-yes)">
+          <Link to="/" className="font-medium text-(--color-yes-text)">
             Find a bet
           </Link>
         </p>
@@ -66,7 +66,7 @@ export function MyBets() {
                 <div className="text-right">
                   <p
                     className={`font-mono text-sm font-medium ${
-                      wager.side === "yes" ? "text-(--color-yes)" : "text-(--color-no)"
+                      wager.side === "yes" ? "text-(--color-yes-text)" : "text-(--color-no-text)"
                     }`}
                   >
                     {wager.amount} {wager.side.toUpperCase()}
@@ -74,7 +74,7 @@ export function MyBets() {
                   {pl !== null && (
                     <p
                       className={`font-mono text-xs ${
-                        pl > 0 ? "text-(--color-yes)" : pl < 0 ? "text-(--color-no)" : "text-(--color-ink-soft)"
+                        pl > 0 ? "text-(--color-yes-text)" : pl < 0 ? "text-(--color-no-text)" : "text-(--color-ink-soft)"
                       }`}
                     >
                       {pl > 0 ? "+" : ""}

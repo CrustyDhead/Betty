@@ -84,6 +84,7 @@ function mapBet(row: Row): Bet {
     title: row.title,
     description: row.description,
     subjectUserId: row.subject_user_id,
+    subjectName: row.subject_name ?? null,
     creatorId: row.creator_id,
     lockTime: row.lock_time,
     status: row.status,
@@ -297,6 +298,7 @@ export async function createBet(input: {
   title: string;
   description: string;
   subjectUserId: string | null;
+  subjectName: string | null;
   creatorId: string;
   lockTime: string;
   category: BetCategory;
@@ -308,6 +310,7 @@ export async function createBet(input: {
       title: input.title,
       description: input.description,
       subject_user_id: input.subjectUserId,
+      subject_name: input.subjectName,
       creator_id: input.creatorId,
       lock_time: input.lockTime,
       category: input.category,
@@ -575,12 +578,28 @@ export interface StreakInfo {
   kind: "win" | "loss" | null;
 }
 
-export function currentStreak(userId: string): StreakInfo {
-  const settled = state.wagers
+// Only wagers on bets that actually resolved to yes/no count as a win or a
+// loss — a void bet is a refund, not a result. Both Leaderboard and Profile
+// used to count void bets as "settled but not a win," which unfairly
+// dragged down win rate for something that was never a loss. This is the
+// one place that logic lives now.
+export function resolvedWagersForUser(userId: string) {
+  return state.wagers
     .filter((w) => w.userId === userId && w.payout !== null)
     .map((w) => ({ wager: w, bet: state.bets.find((b) => b.id === w.betId) }))
-    .filter((r): r is { wager: Wager; bet: Bet } => !!r.bet && r.bet.status === "resolved")
-    .sort((a, b) => new Date(b.bet.createdAt).getTime() - new Date(a.bet.createdAt).getTime());
+    .filter((r): r is { wager: Wager; bet: Bet } => !!r.bet && r.bet.status === "resolved");
+}
+
+export function userWinStats(userId: string) {
+  const resolved = resolvedWagersForUser(userId);
+  const wins = resolved.filter((r) => r.wager.payout! > r.wager.amount).length;
+  return { settledCount: resolved.length, wins, losses: resolved.length - wins };
+}
+
+export function currentStreak(userId: string): StreakInfo {
+  const settled = resolvedWagersForUser(userId).sort(
+    (a, b) => new Date(b.bet.createdAt).getTime() - new Date(a.bet.createdAt).getTime(),
+  );
 
   let streak = 0;
   let kind: "win" | "loss" | null = null;

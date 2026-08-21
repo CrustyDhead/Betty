@@ -48,7 +48,7 @@ export function Login() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Sai"
-            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes)"
+            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
           />
         </label>
 
@@ -59,12 +59,12 @@ export function Login() {
               type="password"
               value={pin}
               onChange={(e) => setPin(e.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes)"
+              className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
             />
           </label>
         )}
 
-        {error && <p className="mt-3 text-sm text-(--color-no)">{error}</p>}
+        {error && <p className="mt-3 text-sm text-(--color-no-text)">{error}</p>}
 
         <button
           type="submit"

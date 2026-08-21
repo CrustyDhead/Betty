@@ -23,7 +23,7 @@ export default function App() {
   if (state.error) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
-        <p className="max-w-sm text-center text-sm text-(--color-no)">
+        <p className="max-w-sm text-center text-sm text-(--color-no-text)">
           Couldn't reach the backend: {state.error}
         </p>
       </div>

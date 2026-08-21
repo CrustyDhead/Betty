@@ -23,8 +23,8 @@ export function SplitBar({ yes, no, size = "sm" }: SplitBarProps) {
         />
       </div>
       <div className="mt-1.5 flex justify-between font-mono text-xs text-(--color-ink-soft)">
-        <span className="text-(--color-yes)">{Math.round(yesPct)}% YES</span>
-        <span className="text-(--color-no)">{Math.round(noPct)}% NO</span>
+        <span className="text-(--color-yes-text)">{Math.round(yesPct)}% YES</span>
+        <span className="text-(--color-no-text)">{Math.round(noPct)}% NO</span>
       </div>
     </div>
   );

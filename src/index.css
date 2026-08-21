@@ -11,8 +11,15 @@
   --color-ink-soft: #6b7280;
   --color-yes: #16b278;
   --color-yes-soft: #e4f7ef;
+  /* Darker than --color-yes specifically for text/button-label use — the
+     vibrant base color is only ~2.5:1 against white, failing WCAG AA
+     (needs 4.5:1). This variant hits ~6:1 against white and the soft bg. */
+  --color-yes-text: #107050;
   --color-no: #ff5d5d;
   --color-no-soft: #ffe9e9;
+  /* Same reasoning as --color-yes-text: the base coral is ~3:1 against
+     white at best, this variant hits ~6.7:1. */
+  --color-no-text: #b81414;
 }
 
 body {

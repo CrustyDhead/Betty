@@ -1,17 +1,15 @@
-import { currentStreak, logout } from "../lib/store";
+import { currentStreak, logout, userWinStats } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { Avatar } from "../components/Avatar";
 
 export function Profile() {
   const user = useCurrentUser();
-  const state = useStoreState();
+  useStoreState();
 
   if (!user) return null;
 
-  const settled = state.wagers.filter((w) => w.userId === user.id && w.payout !== null);
-  const wins = settled.filter((w) => w.payout! > w.amount).length;
-  const losses = settled.length - wins;
-  const winRate = settled.length > 0 ? Math.round((wins / settled.length) * 100) : null;
+  const { settledCount, wins, losses } = userWinStats(user.id);
+  const winRate = settledCount > 0 ? Math.round((wins / settledCount) * 100) : null;
   const streak = currentStreak(user.id);
 
   const badges: { label: string; emoji: string }[] = [];
@@ -41,15 +39,15 @@ export function Profile() {
 
       <div className="mt-4 grid grid-cols-3 gap-3">
         <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
-          <p className="font-mono text-lg font-semibold text-(--color-ink)">{settled.length}</p>
+          <p className="font-mono text-lg font-semibold text-(--color-ink)">{settledCount}</p>
           <p className="text-xs text-(--color-ink-soft)">Settled</p>
         </div>
         <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
-          <p className="font-mono text-lg font-semibold text-(--color-yes)">{wins}</p>
+          <p className="font-mono text-lg font-semibold text-(--color-yes-text)">{wins}</p>
           <p className="text-xs text-(--color-ink-soft)">Wins</p>
         </div>
         <div className="rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
-          <p className="font-mono text-lg font-semibold text-(--color-no)">{losses}</p>
+          <p className="font-mono text-lg font-semibold text-(--color-no-text)">{losses}</p>
           <p className="text-xs text-(--color-ink-soft)">Losses</p>
         </div>
       </div>

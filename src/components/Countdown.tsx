@@ -27,7 +27,7 @@ export function Countdown({ lockTime }: { lockTime: string }) {
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-1 font-mono text-xs font-medium ${
-        locked ? "bg-gray-100 text-(--color-ink-soft)" : "bg-(--color-yes-soft) text-(--color-yes)"
+        locked ? "bg-gray-100 text-(--color-ink-soft)" : "bg-(--color-yes-soft) text-(--color-yes-text)"
       }`}
     >
       {format(msLeft)}

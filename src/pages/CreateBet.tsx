@@ -22,6 +22,7 @@ export function CreateBet() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [subjectUserId, setSubjectUserId] = useState("");
+  const [subjectName, setSubjectName] = useState("");
   const [category, setCategory] = useState<BetCategory>("WFH");
   const [lockTime, setLockTime] = useState(defaultLockTime());
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +44,8 @@ export function CreateBet() {
       const bet = await createBet({
         title: title.trim(),
         description: description.trim(),
-        subjectUserId: subjectUserId || null,
+        subjectUserId: subjectUserId === "__other__" ? null : subjectUserId || null,
+        subjectName: subjectUserId === "__other__" ? subjectName.trim() || null : null,
         creatorId: user.id,
         lockTime: lockDate.toISOString(),
         category,
@@ -68,7 +70,7 @@ export function CreateBet() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Will Nat WFH before 10am?"
-            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes)"
+            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
           />
         </label>
 
@@ -79,7 +81,7 @@ export function CreateBet() {
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
             placeholder="Any context that helps people decide"
-            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes)"
+            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
           />
         </label>
 
@@ -108,7 +110,7 @@ export function CreateBet() {
           <select
             value={subjectUserId}
             onChange={(e) => setSubjectUserId(e.target.value)}
-            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes)"
+            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
           >
             <option value="">Nobody in particular</option>
             {state.users.map((u) => (
@@ -116,8 +118,24 @@ export function CreateBet() {
                 {u.name}
               </option>
             ))}
+            <option value="__other__">Someone else (type a name)</option>
           </select>
         </label>
+
+        {subjectUserId === "__other__" && (
+          <label className="block text-sm font-medium text-(--color-ink)">
+            Their name
+            <input
+              value={subjectName}
+              onChange={(e) => setSubjectName(e.target.value)}
+              placeholder="e.g. Ploy"
+              className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 text-sm outline-none focus:border-(--color-yes-text)"
+            />
+            <span className="mt-1 block text-xs font-normal text-(--color-ink-soft)">
+              They don't need an account for this — but they'll need one to bet themselves.
+            </span>
+          </label>
+        )}
 
         <label className="block text-sm font-medium text-(--color-ink)">
           Lock time
@@ -125,11 +143,11 @@ export function CreateBet() {
             type="datetime-local"
             value={lockTime}
             onChange={(e) => setLockTime(e.target.value)}
-            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 font-mono text-sm outline-none focus:border-(--color-yes)"
+            className="mt-1.5 w-full rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 font-mono text-sm outline-none focus:border-(--color-yes-text)"
           />
         </label>
 
-        {error && <p className="text-sm text-(--color-no)">{error}</p>}
+        {error && <p className="text-sm text-(--color-no-text)">{error}</p>}
 
         <button
           type="submit"

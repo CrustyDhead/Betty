@@ -3,10 +3,10 @@ import { useCurrentUser } from "../lib/useStore";
 import { Avatar } from "./Avatar";
 
 const LINKS = [
-  { to: "/", label: "Feed" },
-  { to: "/create", label: "Create" },
-  { to: "/my-bets", label: "My Bets" },
-  { to: "/leaderboard", label: "Leaderboard" },
+  { to: "/", label: "Feed", icon: "📋" },
+  { to: "/create", label: "Create", icon: "➕" },
+  { to: "/my-bets", label: "My Bets", icon: "🎫" },
+  { to: "/leaderboard", label: "Leaderboard", icon: "🏆" },
 ];
 
 export function NavBar() {
@@ -15,27 +15,31 @@ export function NavBar() {
   return (
     <header className="sticky top-0 z-10 border-b border-black/5 bg-(--color-bg)/90 backdrop-blur">
       <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
-        <nav className="flex items-center gap-1">
+        <nav className="flex items-center gap-0.5 sm:gap-1">
           {LINKS.map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
               end={link.to === "/"}
+              title={link.label}
               className={({ isActive }) =>
-                `rounded-full px-3 py-1.5 font-display text-sm font-medium transition ${
+                `rounded-full px-2.5 py-1.5 font-display text-sm font-medium transition sm:px-3 ${
                   isActive
                     ? "bg-(--color-ink) text-white"
                     : "text-(--color-ink-soft) hover:bg-black/5 hover:text-(--color-ink)"
                 }`
               }
             >
-              {link.label}
+              <span className="sm:hidden" aria-hidden="true">
+                {link.icon}
+              </span>
+              <span className="hidden sm:inline">{link.label}</span>
             </NavLink>
           ))}
         </nav>
 
         {user && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <span className="font-mono text-sm font-semibold text-(--color-ink)">
               {user.tokenBalance.toLocaleString()}
             </span>
