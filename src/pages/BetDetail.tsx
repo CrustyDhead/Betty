@@ -39,6 +39,7 @@ export function BetDetail() {
   const [deleting, setDeleting] = useState(false);
   const [resolvingEarly, setResolvingEarly] = useState(false);
   const [settling, setSettling] = useState(false);
+  const [showCalc, setShowCalc] = useState(false);
 
   const bet = state.bets.find((b) => b.id === id);
   if (!bet) {
@@ -246,6 +247,68 @@ export function BetDetail() {
             Void — all stakes refunded
           </div>
         )}
+
+        {status === "resolved" && (
+          <button
+            onClick={() => setShowCalc((v) => !v)}
+            className="mt-3 text-xs font-medium text-(--color-ink-soft) underline decoration-dotted hover:text-(--color-ink)"
+          >
+            {showCalc ? "Hide payout calculation" : "📊 Review payout calculation"}
+          </button>
+        )}
+
+        {status === "resolved" &&
+          showCalc &&
+          (() => {
+            const losingTotal = bet.outcome === "yes" ? no : yes;
+            const currentWinningTotal = bet.outcome === "yes" ? yes : no;
+            const winners = wagers
+              .filter((w) => w.side === bet.outcome)
+              .sort((a, b) => (b.payout ?? 0) - (a.payout ?? 0));
+
+            // A winner's wager can vanish after the fact (their account got
+            // deleted, which cascades their wager/payout rows), leaving the
+            // live pool total lower than what actually produced everyone
+            // else's payout. Reconstruct the true at-resolve-time winning
+            // total from a surviving winner's own numbers instead of
+            // resumming current wagers, so the formula matches reality —
+            // the per-winner payouts below are always exact regardless
+            // (straight from the DB), only this total needs reconstructing.
+            const reference = winners.find((w) => w.payout !== null && w.payout > w.amount && w.amount > 0);
+            const winningTotal = reference
+              ? (reference.amount * losingTotal) / (reference.payout! - reference.amount)
+              : currentWinningTotal;
+
+            return (
+              <div className="mt-3 rounded-xl bg-(--color-bg) p-4 text-xs">
+                <p className="text-(--color-ink)">
+                  Every winner gets their stake back, plus a share of the losing side's pool
+                  proportional to how much of the winning side they staked:
+                </p>
+                <p className="mt-2 rounded-lg bg-(--color-surface) px-3 py-2 font-mono text-(--color-ink-soft)">
+                  payout = your stake + (your stake ÷ {Math.round(winningTotal).toLocaleString()} winning total) ×{" "}
+                  {losingTotal.toLocaleString()} losing pool
+                </p>
+                <div className="mt-3 space-y-1.5">
+                  {winners.map((w) => {
+                    const bettor = state.users.find((u) => u.id === w.userId);
+                    const share = winningTotal > 0 ? (w.amount / winningTotal) * 100 : 0;
+                    return (
+                      <div key={w.id} className="flex items-center justify-between text-(--color-ink-soft)">
+                        <span>
+                          {bettor?.name ?? "?"} — {w.amount} staked ({share.toFixed(1)}% of winning side)
+                        </span>
+                        <span className="font-mono font-medium text-(--color-yes-text)">
+                          → {Math.round(w.payout ?? 0)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {winners.length === 0 && <p className="text-(--color-ink-soft)">No winning wagers.</p>}
+                </div>
+              </div>
+            );
+          })()}
 
         {(status === "resolved" || status === "void") && user && !bet.disputed && (
           <button
