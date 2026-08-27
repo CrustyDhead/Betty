@@ -3,12 +3,18 @@ import { useParams } from "react-router-dom";
 import {
   ENGAGEMENT_TIERS,
   LAUNCH_DATE,
+  LOAN_CAP,
+  LOAN_INTEREST_RATE,
+  LOAN_MIN,
   WEEKLY_STIPEND,
+  activeLoanFor,
+  borrowTokens,
   currentStreak,
   logout,
   notificationPermission,
   projectedStipend,
   renameUser,
+  repayLoan,
   requestNotificationPermission,
   setAvatarColor,
   setAvatarEmoji,
@@ -28,6 +34,8 @@ const TRANSACTION_LABEL: Record<TransactionType, { emoji: string; label: string 
   refund: { emoji: "↩️", label: "Refund" },
   transfer: { emoji: "🔄", label: "Transfer" },
   roulette: { emoji: "🎰", label: "Roulette" },
+  loan: { emoji: "🏦", label: "Loan" },
+  repayment: { emoji: "🧾", label: "Loan repayment" },
 };
 
 const TIER_EMOJI: Record<string, string> = {
@@ -75,6 +83,11 @@ export function Profile() {
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferSuccess, setTransferSuccess] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [borrowAmount, setBorrowAmount] = useState("");
+  const [borrowError, setBorrowError] = useState<string | null>(null);
+  const [borrowing, setBorrowing] = useState(false);
+  const [repayError, setRepayError] = useState<string | null>(null);
+  const [repaying, setRepaying] = useState(false);
 
   async function handleEnableNotifications() {
     setNotifPermission(await requestNotificationPermission());
@@ -94,6 +107,7 @@ export function Profile() {
   const streak = currentStreak(viewedUser.id);
   const transactions = userTransactions(viewedUser.id);
   const stipend = projectedStipend(viewedUser.id);
+  const loan = activeLoanFor(viewedUser.id);
 
   const badges: { label: string; emoji: string }[] = [];
   if (streak.kind === "win" && streak.streak >= 2) {
@@ -190,6 +204,39 @@ export function Profile() {
       setTransferError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleBorrow(e: FormEvent) {
+    e.preventDefault();
+    if (!currentUser) return;
+    setBorrowError(null);
+    const amt = Number(borrowAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setBorrowError("Enter a positive amount");
+      return;
+    }
+    setBorrowing(true);
+    try {
+      await borrowTokens(currentUser.id, amt);
+      setBorrowAmount("");
+    } catch (err) {
+      setBorrowError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBorrowing(false);
+    }
+  }
+
+  async function handleRepay() {
+    if (!currentUser) return;
+    setRepayError(null);
+    setRepaying(true);
+    try {
+      await repayLoan(currentUser.id);
+    } catch (err) {
+      setRepayError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setRepaying(false);
     }
   }
 
@@ -295,6 +342,80 @@ export function Profile() {
                   ))}
                 </div>
               </>
+            )}
+          </div>
+
+          <h2 className="mt-6 font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+            Loan
+          </h2>
+          <div className="mt-3 rounded-2xl bg-(--color-surface) p-4 shadow-sm shadow-black/5">
+            {loan ? (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-(--color-ink)">
+                      {loan.status === "overdue" ? "⚠️ Overdue" : "🏦 Active loan"}
+                    </p>
+                    <p className="text-xs text-(--color-ink-soft)">
+                      Borrowed {Math.round(loan.principal)} at {Math.round(loan.interestRate * 100)}% interest
+                    </p>
+                  </div>
+                  <p className="text-right font-mono text-lg font-semibold text-(--color-no-text)">
+                    {Math.round(loan.amountOwed)}
+                    <span className="block text-xs font-normal text-(--color-ink-soft)">owed</span>
+                  </p>
+                </div>
+                <p className="mt-2 text-xs text-(--color-ink-soft)">
+                  {loan.status === "overdue"
+                    ? "Past due — blocks new loans until paid off."
+                    : `Due ${formatDate(new Date(loan.dueAt).getTime())}`}
+                </p>
+                {isOwn && (
+                  <>
+                    <button
+                      onClick={handleRepay}
+                      disabled={repaying || currentUser.tokenBalance < loan.amountOwed}
+                      className="mt-3 w-full rounded-xl bg-(--color-ink) py-2.5 font-display text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                    >
+                      {repaying ? "…" : `Repay ${Math.round(loan.amountOwed)}`}
+                    </button>
+                    {currentUser.tokenBalance < loan.amountOwed && (
+                      <p className="mt-1.5 text-xs text-(--color-no-text)">
+                        Not enough tokens to repay in full yet.
+                      </p>
+                    )}
+                    {repayError && <p className="mt-1.5 text-xs text-(--color-no-text)">{repayError}</p>}
+                  </>
+                )}
+              </>
+            ) : isOwn ? (
+              <form onSubmit={handleBorrow}>
+                <p className="text-xs text-(--color-ink-soft)">
+                  Borrow up to {LOAN_CAP} tokens at {Math.round(LOAN_INTEREST_RATE * 100)}% flat interest, due
+                  in 7 days.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={borrowAmount}
+                    onChange={(e) => setBorrowAmount(e.target.value)}
+                    type="number"
+                    step="any"
+                    inputMode="numeric"
+                    placeholder={`${LOAN_MIN}–${LOAN_CAP}`}
+                    className="flex-1 rounded-xl border border-black/10 bg-(--color-bg) px-3 py-2.5 font-mono text-sm outline-none focus:border-(--color-yes-text)"
+                  />
+                  <button
+                    type="submit"
+                    disabled={borrowing}
+                    className="rounded-xl bg-(--color-ink) px-4 py-2.5 font-display text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                  >
+                    {borrowing ? "…" : "Borrow"}
+                  </button>
+                </div>
+                {borrowError && <p className="mt-2 text-sm text-(--color-no-text)">{borrowError}</p>}
+              </form>
+            ) : (
+              <p className="text-sm text-(--color-ink-soft)">No active loan.</p>
             )}
           </div>
 

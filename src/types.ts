@@ -45,7 +45,15 @@ export interface Wager {
   payout: number | null;
 }
 
-export type TransactionType = "stipend" | "wager" | "payout" | "refund" | "transfer" | "roulette";
+export type TransactionType =
+  | "stipend"
+  | "wager"
+  | "payout"
+  | "refund"
+  | "transfer"
+  | "roulette"
+  | "loan"
+  | "repayment";
 
 export interface Transaction {
   id: string;
@@ -86,4 +94,18 @@ export interface RouletteBet {
   betValue: string | null;
   amount: number;
   payout: number | null;
+}
+
+export type LoanStatus = "active" | "overdue" | "repaid";
+
+export interface Loan {
+  id: string;
+  userId: string;
+  principal: number;
+  interestRate: number;
+  amountOwed: number;
+  status: LoanStatus;
+  borrowedAt: string;
+  dueAt: string;
+  repaidAt: string | null;
 }

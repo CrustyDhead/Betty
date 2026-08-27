@@ -5,6 +5,7 @@ import type {
   BetCategory,
   BetStatus,
   Comment,
+  Loan,
   RouletteBet,
   RouletteBetType,
   RouletteRound,
@@ -33,6 +34,15 @@ export const STARTING_BALANCE = 1000;
 export const WEEKLY_STIPEND = 100;
 export const MIN_WAGER = 10;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+// House-issued loans, not peer-to-peer — avoids real interpersonal debt
+// over fake tokens. Flat (non-compounding) interest: borrow 200 -> owe
+// 220, due in 7 days. One active loan per user at a time (enforced by a
+// partial unique index in the DB too, not just here).
+export const LOAN_MIN = 10;
+export const LOAN_CAP = 500;
+export const LOAN_INTEREST_RATE = 0.1;
+export const LOAN_TERM_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Everyone's stipend is flat for the app's first week live, so nobody's
 // early impression of the game is "why did I get less than them" before
@@ -69,6 +79,7 @@ interface State {
   comments: Comment[];
   rouletteRounds: RouletteRound[];
   rouletteBets: RouletteBet[];
+  loans: Loan[];
   loading: boolean;
   error: string | null;
   stipendAlert: StipendAlert | null;
@@ -82,6 +93,7 @@ let state: State = {
   comments: [],
   rouletteRounds: [],
   rouletteBets: [],
+  loans: [],
   loading: true,
   error: null,
   stipendAlert: null,
@@ -185,6 +197,19 @@ function mapRouletteBet(row: Row): RouletteBet {
     payout: row.payout === null ? null : Number(row.payout),
   };
 }
+function mapLoan(row: Row): Loan {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    principal: Number(row.principal),
+    interestRate: Number(row.interest_rate),
+    amountOwed: Number(row.amount_owed),
+    status: row.status,
+    borrowedAt: row.borrowed_at,
+    dueAt: row.due_at,
+    repaidAt: row.repaid_at ?? null,
+  };
+}
 
 function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   const idx = list.findIndex((x) => x.id === item.id);
@@ -232,9 +257,17 @@ async function fetchAll() {
   });
 
   // Fetched separately and never allowed to block the rest of the app —
-  // the roulette migration might not be applied yet on every environment,
-  // and a missing table here shouldn't take down Feed/bets/profile.
+  // these migrations might not be applied yet on every environment, and a
+  // missing table here shouldn't take down Feed/bets/profile.
   await pollRoulette();
+  await fetchLoans();
+}
+
+async function fetchLoans() {
+  const client = requireClient();
+  const { data, error } = await client.from("loans").select("*");
+  if (error) return;
+  setState({ loans: (data ?? []).map(mapLoan) });
 }
 
 // Fires a browser notification when a bet the current user has a wager on
@@ -337,6 +370,9 @@ export async function initStore() {
     .on("postgres_changes", { event: "*", schema: "public", table: "roulette_bets" }, (payload) =>
       applyChange(payload, "rouletteBets", mapRouletteBet),
     )
+    .on("postgres_changes", { event: "*", schema: "public", table: "loans" }, (payload) =>
+      applyChange(payload, "loans", mapLoan),
+    )
     .subscribe();
 
   setInterval(() => {
@@ -351,7 +387,15 @@ export async function initStore() {
 }
 
 function applyChange<
-  K extends "users" | "bets" | "wagers" | "transactions" | "comments" | "rouletteRounds" | "rouletteBets",
+  K extends
+    | "users"
+    | "bets"
+    | "wagers"
+    | "transactions"
+    | "comments"
+    | "rouletteRounds"
+    | "rouletteBets"
+    | "loans",
 >(
   payload: RealtimePostgresChangesPayload<Row>,
   key: K,
@@ -407,6 +451,7 @@ export async function login(name: string): Promise<User> {
   listeners.forEach((l) => l());
 
   await applyWeeklyStipendIfDue(user, existing?.last_stipend_at ?? null);
+  await collectLoanIfDue(user.id);
   return user;
 }
 
@@ -477,6 +522,147 @@ async function applyWeeklyStipendIfDue(user: User, lastStipendAt: string | null)
 
 export function clearStipendAlert() {
   setState({ stipendAlert: null });
+}
+
+// ---- Loans ----
+
+export function activeLoanFor(userId: string): Loan | null {
+  return state.loans.find((l) => l.userId === userId && (l.status === "active" || l.status === "overdue")) ?? null;
+}
+
+export async function borrowTokens(userId: string, amount: number): Promise<void> {
+  const user = state.users.find((u) => u.id === userId);
+  if (!user) throw new Error("User not found");
+  if (activeLoanFor(userId)) throw new Error("Pay off your current loan before borrowing again");
+  if (!Number.isInteger(amount) || amount < LOAN_MIN) {
+    throw new Error(`Loans must be a whole number of at least ${LOAN_MIN} tokens`);
+  }
+  if (amount > LOAN_CAP) throw new Error(`Can't borrow more than ${LOAN_CAP} tokens`);
+
+  const client = requireClient();
+  const { data: loanRow, error: loanErr } = await client
+    .from("loans")
+    .insert({
+      user_id: userId,
+      principal: amount,
+      interest_rate: LOAN_INTEREST_RATE,
+      amount_owed: amount * (1 + LOAN_INTEREST_RATE),
+      due_at: new Date(Date.now() + LOAN_TERM_MS).toISOString(),
+    })
+    .select()
+    .single();
+  if (loanErr) throw new Error(loanErr.message);
+
+  const { data: userRow, error: userErr } = await client
+    .from("users")
+    .update({ token_balance: user.tokenBalance + amount })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (userErr) throw new Error(userErr.message);
+
+  const { data: txnRow } = await client
+    .from("transactions")
+    .insert({ user_id: userId, type: "loan", amount })
+    .select()
+    .single();
+
+  setState({
+    loans: upsertById(state.loans, mapLoan(loanRow)),
+    users: upsertById(state.users, mapUser(userRow)),
+    transactions: txnRow ? upsertById(state.transactions, mapTransaction(txnRow)) : state.transactions,
+  });
+}
+
+export async function repayLoan(userId: string): Promise<void> {
+  const loan = activeLoanFor(userId);
+  if (!loan) throw new Error("No active loan");
+  const user = state.users.find((u) => u.id === userId);
+  if (!user) throw new Error("User not found");
+  if (user.tokenBalance < loan.amountOwed) throw new Error("Not enough tokens to repay in full");
+
+  const client = requireClient();
+  const { data: userRow, error: userErr } = await client
+    .from("users")
+    .update({ token_balance: user.tokenBalance - loan.amountOwed })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (userErr) throw new Error(userErr.message);
+
+  const { data: loanRow, error: loanErr } = await client
+    .from("loans")
+    .update({ status: "repaid", amount_owed: 0, repaid_at: new Date().toISOString() })
+    .eq("id", loan.id)
+    .eq("status", loan.status)
+    .select()
+    .maybeSingle();
+  if (loanErr) throw new Error(loanErr.message);
+  if (!loanRow) throw new Error("This loan was already settled");
+
+  const { data: txnRow } = await client
+    .from("transactions")
+    .insert({ user_id: userId, type: "repayment", amount: -loan.amountOwed })
+    .select()
+    .single();
+
+  setState({
+    users: upsertById(state.users, mapUser(userRow)),
+    loans: upsertById(state.loans, mapLoan(loanRow)),
+    transactions: txnRow ? upsertById(state.transactions, mapTransaction(txnRow)) : state.transactions,
+  });
+}
+
+// Called at login. No backend/cron exists in this app, so a loan's due
+// date is only actually enforced the next time its owner (or, via the
+// realtime/poll sync, anyone loading the app) triggers this check —
+// same "honor system, client-triggered" model as everything else here.
+// Collects whatever's available from the current balance; never
+// overdraws it. A shortfall flips the loan to "overdue" and blocks new
+// loans until the remainder is paid off, rather than going negative.
+async function collectLoanIfDue(userId: string): Promise<void> {
+  const loan = activeLoanFor(userId);
+  if (!loan) return;
+  if (Date.now() < new Date(loan.dueAt).getTime()) return;
+
+  const user = state.users.find((u) => u.id === userId);
+  if (!user) return;
+
+  const payment = Math.min(user.tokenBalance, loan.amountOwed);
+  const remaining = loan.amountOwed - payment;
+  const newStatus: Loan["status"] = remaining <= 0 ? "repaid" : "overdue";
+
+  const client = requireClient();
+  const { data: loanRow, error: loanErr } = await client
+    .from("loans")
+    .update({
+      amount_owed: remaining,
+      status: newStatus,
+      repaid_at: newStatus === "repaid" ? new Date().toISOString() : null,
+    })
+    .eq("id", loan.id)
+    .eq("status", loan.status)
+    .select()
+    .maybeSingle();
+  if (loanErr || !loanRow) return; // non-critical — next login retries
+  setState({ loans: upsertById(state.loans, mapLoan(loanRow)) });
+
+  if (payment <= 0) return;
+
+  const { data: userRow, error: userErr } = await client
+    .from("users")
+    .update({ token_balance: user.tokenBalance - payment })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+
+  const { data: txnRow } = await client
+    .from("transactions")
+    .insert({ user_id: userId, type: "repayment", amount: -payment })
+    .select()
+    .single();
+  if (txnRow) setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 }
 
 export async function setAvatarEmoji(userId: string, emoji: string | null) {
