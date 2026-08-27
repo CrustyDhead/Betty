@@ -7,6 +7,7 @@ const LINKS = [
   { to: "/create", label: "Create", icon: "➕" },
   { to: "/my-bets", label: "My Bets", icon: "🎫" },
   { to: "/leaderboard", label: "Leaderboard", icon: "🏆" },
+  { to: "/roulette", label: "Roulette", icon: "🎰" },
 ];
 
 export function NavBar() {

@@ -1,6 +1,19 @@
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import type { Bet, BetCategory, BetStatus, Comment, Side, Transaction, User, Wager } from "../types";
+import type {
+  Bet,
+  BetCategory,
+  BetStatus,
+  Comment,
+  RouletteBet,
+  RouletteBetType,
+  RouletteRound,
+  Side,
+  Transaction,
+  User,
+  Wager,
+} from "../types";
+import { ROULETTE_MIN_BET, calculatePayout, rollLuckyNumbers, rollWinningNumber } from "./roulette";
 
 /**
  * Supabase-backed data layer (see supabase/schema.sql +
@@ -54,6 +67,8 @@ interface State {
   wagers: Wager[];
   transactions: Transaction[];
   comments: Comment[];
+  rouletteRounds: RouletteRound[];
+  rouletteBets: RouletteBet[];
   loading: boolean;
   error: string | null;
   stipendAlert: StipendAlert | null;
@@ -65,6 +80,8 @@ let state: State = {
   wagers: [],
   transactions: [],
   comments: [],
+  rouletteRounds: [],
+  rouletteBets: [],
   loading: true,
   error: null,
   stipendAlert: null,
@@ -146,6 +163,28 @@ function mapTransaction(row: Row): Transaction {
 function mapComment(row: Row): Comment {
   return { id: row.id, betId: row.bet_id, userId: row.user_id, text: row.text, timestamp: row.created_at };
 }
+function mapRouletteRound(row: Row): RouletteRound {
+  return {
+    id: row.id,
+    status: row.status,
+    bettingClosesAt: row.betting_closes_at,
+    luckyNumbers: row.lucky_numbers ?? null,
+    winningNumber: row.winning_number ?? null,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at ?? null,
+  };
+}
+function mapRouletteBet(row: Row): RouletteBet {
+  return {
+    id: row.id,
+    roundId: row.round_id,
+    userId: row.user_id,
+    betType: row.bet_type,
+    betValue: row.bet_value ?? null,
+    amount: Number(row.amount),
+    payout: row.payout === null ? null : Number(row.payout),
+  };
+}
 
 function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   const idx = list.findIndex((x) => x.id === item.id);
@@ -191,6 +230,11 @@ async function fetchAll() {
     transactions: (transactions.data ?? []).map(mapTransaction),
     comments: (comments.data ?? []).map(mapComment),
   });
+
+  // Fetched separately and never allowed to block the rest of the app —
+  // the roulette migration might not be applied yet on every environment,
+  // and a missing table here shouldn't take down Feed/bets/profile.
+  await pollRoulette();
 }
 
 // Fires a browser notification when a bet the current user has a wager on
@@ -228,6 +272,23 @@ async function pollAndNotify() {
   const prevBets = state.bets;
   await fetchAll();
   notifyOnResolutions(prevBets, state.bets, state.wagers);
+}
+
+// The global 15s poll is too slow for a 20s betting round to feel alive —
+// this is a lighter, roulette-only refetch the Roulette page calls on its
+// own fast interval while mounted, instead of widening the poll for every
+// page.
+export async function pollRoulette() {
+  const client = requireClient();
+  const [rounds, bets] = await Promise.all([
+    client.from("roulette_rounds").select("*").order("created_at", { ascending: false }).limit(20),
+    client.from("roulette_bets").select("*").order("created_at", { ascending: false }).limit(500),
+  ]);
+  if (rounds.error || bets.error) return;
+  setState({
+    rouletteRounds: (rounds.data ?? []).map(mapRouletteRound),
+    rouletteBets: (bets.data ?? []).map(mapRouletteBet),
+  });
 }
 
 export function notificationPermission(): NotificationPermission | "unsupported" {
@@ -270,6 +331,12 @@ export async function initStore() {
     .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, (payload) =>
       applyChange(payload, "comments", mapComment),
     )
+    .on("postgres_changes", { event: "*", schema: "public", table: "roulette_rounds" }, (payload) =>
+      applyChange(payload, "rouletteRounds", mapRouletteRound),
+    )
+    .on("postgres_changes", { event: "*", schema: "public", table: "roulette_bets" }, (payload) =>
+      applyChange(payload, "rouletteBets", mapRouletteBet),
+    )
     .subscribe();
 
   setInterval(() => {
@@ -283,7 +350,9 @@ export async function initStore() {
   }
 }
 
-function applyChange<K extends "users" | "bets" | "wagers" | "transactions" | "comments">(
+function applyChange<
+  K extends "users" | "bets" | "wagers" | "transactions" | "comments" | "rouletteRounds" | "rouletteBets",
+>(
   payload: RealtimePostgresChangesPayload<Row>,
   key: K,
   mapper: (row: Row) => State[K][number],
@@ -931,4 +1000,157 @@ export function currentStreak(userId: string): StreakInfo {
     }
   }
   return { streak, kind: streak > 0 ? kind : null };
+}
+
+// ---- Roulette ----
+// No backend/cron exists in this app, so every round-lifecycle transition
+// below is triggered by whichever connected client's local timer gets
+// there first (see roulette.ts and the Roulette page for the timers). Each
+// write is filtered on the expected current status, same atomic-claim
+// pattern as resolveBet/voidBet, so a simultaneous trigger from multiple
+// idle browsers can't double-fire a phase.
+
+export function currentRouletteRound(): RouletteRound | null {
+  const active = state.rouletteRounds.find((r) => r.status !== "resolved");
+  if (active) return active;
+  return (
+    [...state.rouletteRounds].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )[0] ?? null
+  );
+}
+
+export function rouletteBetsForRound(roundId: string): RouletteBet[] {
+  return state.rouletteBets.filter((b) => b.roundId === roundId);
+}
+
+// Starts the next round if nothing's currently active — this is what makes
+// rounds run back-to-back "whenever someone's in the game": the Roulette
+// page calls this on mount and after every resolution, and does nothing if
+// a round is already betting/spinning.
+export async function ensureActiveRouletteRound(bettingMs: number): Promise<void> {
+  if (state.rouletteRounds.some((r) => r.status !== "resolved")) return;
+  const client = requireClient();
+  const { error } = await client.from("roulette_rounds").insert({
+    status: "betting",
+    betting_closes_at: new Date(Date.now() + bettingMs).toISOString(),
+  });
+  // 23505 = the partial unique index caught a race with another client
+  // starting the same next round — fine, whoever won is the real one.
+  if (error && error.code !== "23505") {
+    // Non-critical for a fun feature — the next poll will just retry.
+  }
+}
+
+export async function closeRouletteBettingIfDue(round: RouletteRound): Promise<void> {
+  if (round.status !== "betting") return;
+  if (Date.now() < new Date(round.bettingClosesAt).getTime()) return;
+
+  const client = requireClient();
+  const luckyNumbers = rollLuckyNumbers();
+  const winningNumber = rollWinningNumber();
+  const { data, error } = await client
+    .from("roulette_rounds")
+    .update({ status: "spinning", lucky_numbers: luckyNumbers, winning_number: winningNumber })
+    .eq("id", round.id)
+    .eq("status", "betting")
+    .select()
+    .maybeSingle();
+  if (!error && data) setState({ rouletteRounds: upsertById(state.rouletteRounds, mapRouletteRound(data)) });
+}
+
+// Called by whichever client's local spin animation finishes first, some
+// fixed delay after status flipped to "spinning". Pays out every bet on
+// the round — losers were already debited when they placed their bet, so
+// only winners need a credit + ledger entry here.
+export async function resolveRouletteRound(roundId: string): Promise<void> {
+  const client = requireClient();
+  const { data: claimedRow, error: claimErr } = await client
+    .from("roulette_rounds")
+    .update({ status: "resolved", resolved_at: new Date().toISOString() })
+    .eq("id", roundId)
+    .eq("status", "spinning")
+    .select()
+    .maybeSingle();
+  if (claimErr || !claimedRow) return; // someone else already resolved it
+  const round = mapRouletteRound(claimedRow);
+  setState({ rouletteRounds: upsertById(state.rouletteRounds, round) });
+  if (round.winningNumber === null) return;
+
+  const bets = rouletteBetsForRound(roundId);
+  for (const bet of bets) {
+    const payout = calculatePayout(bet, round.winningNumber, round.luckyNumbers);
+
+    const { data: betRow, error: betErr } = await client
+      .from("roulette_bets")
+      .update({ payout })
+      .eq("id", bet.id)
+      .select()
+      .single();
+    if (!betErr) setState({ rouletteBets: upsertById(state.rouletteBets, mapRouletteBet(betRow)) });
+    if (payout <= 0) continue;
+
+    const user = state.users.find((u) => u.id === bet.userId);
+    if (user) {
+      const { data: userRow, error: userErr } = await client
+        .from("users")
+        .update({ token_balance: user.tokenBalance + payout })
+        .eq("id", user.id)
+        .select()
+        .single();
+      if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+    }
+    const { data: txnRow } = await client
+      .from("transactions")
+      .insert({ user_id: bet.userId, type: "roulette", amount: payout })
+      .select()
+      .single();
+    if (txnRow) setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
+  }
+}
+
+export async function placeRouletteBet(
+  roundId: string,
+  userId: string,
+  betType: RouletteBetType,
+  betValue: string | null,
+  amount: number,
+): Promise<void> {
+  const round = state.rouletteRounds.find((r) => r.id === roundId);
+  const user = state.users.find((u) => u.id === userId);
+  if (!round) throw new Error("Round not found");
+  if (!user) throw new Error("User not found");
+  if (round.status !== "betting") throw new Error("Betting is closed for this round");
+  if (!Number.isInteger(amount) || amount < ROULETTE_MIN_BET) {
+    throw new Error(`Bets must be a whole number of at least ${ROULETTE_MIN_BET} tokens`);
+  }
+  if (amount > user.tokenBalance) throw new Error("Insufficient balance");
+
+  const client = requireClient();
+  const { data: betRow, error: betErr } = await client
+    .from("roulette_bets")
+    .insert({ round_id: roundId, user_id: userId, bet_type: betType, bet_value: betValue, amount })
+    .select()
+    .single();
+  if (betErr) throw new Error(betErr.message);
+
+  const { data: userRow, error: userErr } = await client
+    .from("users")
+    .update({ token_balance: user.tokenBalance - amount })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (userErr) throw new Error(userErr.message);
+
+  const { data: txnRow } = await client
+    .from("transactions")
+    .insert({ user_id: userId, type: "roulette", amount: -amount })
+    .select()
+    .single();
+
+  setState({
+    rouletteBets: upsertById(state.rouletteBets, mapRouletteBet(betRow)),
+    users: upsertById(state.users, mapUser(userRow)),
+    transactions: txnRow ? upsertById(state.transactions, mapTransaction(txnRow)) : state.transactions,
+  });
 }

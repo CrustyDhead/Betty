@@ -45,7 +45,7 @@ export interface Wager {
   payout: number | null;
 }
 
-export type TransactionType = "stipend" | "wager" | "payout" | "refund" | "transfer";
+export type TransactionType = "stipend" | "wager" | "payout" | "refund" | "transfer" | "roulette";
 
 export interface Transaction {
   id: string;
@@ -53,9 +53,37 @@ export interface Transaction {
   type: TransactionType;
   amount: number;
   // Which bet this relates to, for wager/payout/refund — null for
-  // stipend/transfer, which aren't tied to a specific bet.
+  // stipend/transfer/roulette, which aren't tied to a specific bet.
   betId: string | null;
   // The other party in a transfer — null for every other type.
   counterpartyUserId: string | null;
   timestamp: string;
+}
+
+export type RouletteBetType = "number" | "red" | "black" | "odd" | "even" | "low" | "high";
+export type RouletteRoundStatus = "betting" | "spinning" | "resolved";
+
+export interface RouletteLuckyNumber {
+  number: number;
+  multiplier: number;
+}
+
+export interface RouletteRound {
+  id: string;
+  status: RouletteRoundStatus;
+  bettingClosesAt: string;
+  luckyNumbers: RouletteLuckyNumber[] | null;
+  winningNumber: number | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface RouletteBet {
+  id: string;
+  roundId: string;
+  userId: string;
+  betType: RouletteBetType;
+  betValue: string | null;
+  amount: number;
+  payout: number | null;
 }

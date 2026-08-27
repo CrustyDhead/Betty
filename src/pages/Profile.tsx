@@ -27,6 +27,7 @@ const TRANSACTION_LABEL: Record<TransactionType, { emoji: string; label: string 
   payout: { emoji: "🏆", label: "Payout" },
   refund: { emoji: "↩️", label: "Refund" },
   transfer: { emoji: "🔄", label: "Transfer" },
+  roulette: { emoji: "🎰", label: "Roulette" },
 };
 
 const TIER_EMOJI: Record<string, string> = {
