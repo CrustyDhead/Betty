@@ -51,7 +51,7 @@ export const LOAN_TERM_MS = 7 * 24 * 60 * 60 * 1000;
 // each day instead of a passive grant, so it actually rewards coming back.
 // A streak (consecutive days, missing one resets it) gets a bonus every
 // 7-day milestone.
-export const CHECKIN_AMOUNT = 50;
+export const CHECKIN_AMOUNT = 200;
 export const CHECKIN_STREAK_BONUS = 200;
 export const CHECKIN_STREAK_BONUS_EVERY = 7;
 const CHECKIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;

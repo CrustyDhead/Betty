@@ -49,6 +49,41 @@ function formatTimestamp(iso: string) {
   });
 }
 
+const STATEMENT_PAGE_SIZE = 20;
+
+interface GroupedTransaction {
+  id: string; // first transaction's id in the group, used as the React key
+  type: TransactionType;
+  context: string | null;
+  timestamp: string;
+  amount: number;
+  count: number;
+}
+
+// Consecutive entries from the same game session (same type, same minute,
+// same context — e.g. a burst of roulette bets) collapse into one row so
+// "-10 -10 -10" at 3:59pm reads as "-30" instead of three near-identical
+// lines. Different bets/counterparties never merge even within the same
+// minute, since context has to match too.
+function groupTransactions(
+  txns: Transaction[],
+  contextFor: (t: Transaction) => string | null,
+): GroupedTransaction[] {
+  const groups: GroupedTransaction[] = [];
+  for (const t of txns) {
+    const context = contextFor(t);
+    const minute = formatTimestamp(t.timestamp);
+    const last = groups[groups.length - 1];
+    if (last && last.type === t.type && last.context === context && formatTimestamp(last.timestamp) === minute) {
+      last.amount += t.amount;
+      last.count += 1;
+    } else {
+      groups.push({ id: t.id, type: t.type, context, timestamp: t.timestamp, amount: t.amount, count: 1 });
+    }
+  }
+  return groups;
+}
+
 function formatDate(ms: number) {
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -86,6 +121,7 @@ export function Profile() {
   const [checkingIn, setCheckingIn] = useState(false);
   const [checkinError, setCheckinError] = useState<string | null>(null);
   const [checkinSuccess, setCheckinSuccess] = useState<string | null>(null);
+  const [statementVisible, setStatementVisible] = useState(STATEMENT_PAGE_SIZE);
 
   async function handleEnableNotifications() {
     setNotifPermission(await requestNotificationPermission());
@@ -475,41 +511,59 @@ export function Profile() {
           {transactions.length === 0 ? (
             <p className="mt-3 text-sm text-(--color-ink-soft)">No token activity yet.</p>
           ) : (
-            <div className="mt-3 space-y-2">
-              {transactions.map((t) => {
-                const meta = TRANSACTION_LABEL[t.type];
-                const context = transactionContext(t);
-                return (
-                  <div
-                    key={t.id}
-                    className="flex items-center justify-between rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-base">{meta.emoji}</span>
-                      <div>
-                        <p className="text-sm font-medium text-(--color-ink)">
-                          {meta.label}
-                          {context && <span className="text-(--color-ink-soft)"> · {context}</span>}
-                        </p>
-                        <p className="text-xs text-(--color-ink-soft)">{formatTimestamp(t.timestamp)}</p>
-                      </div>
-                    </div>
-                    <span
-                      className={`font-mono text-sm font-semibold ${
-                        t.amount > 0
-                          ? "text-(--color-yes-text)"
-                          : t.amount < 0
-                            ? "text-(--color-no-text)"
-                            : "text-(--color-ink-soft)"
-                      }`}
-                    >
-                      {t.amount > 0 ? "+" : ""}
-                      {Math.round(t.amount).toLocaleString()}
-                    </span>
+            (() => {
+              const grouped = groupTransactions(transactions, transactionContext);
+              const visible = grouped.slice(0, statementVisible);
+              return (
+                <>
+                  <div className="mt-3 space-y-2">
+                    {visible.map((g) => {
+                      const meta = TRANSACTION_LABEL[g.type];
+                      return (
+                        <div
+                          key={g.id}
+                          className="flex items-center justify-between rounded-xl bg-(--color-surface) px-4 py-3 shadow-sm shadow-black/5"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-base">{meta.emoji}</span>
+                            <div>
+                              <p className="text-sm font-medium text-(--color-ink)">
+                                {meta.label}
+                                {g.context && <span className="text-(--color-ink-soft)"> · {g.context}</span>}
+                                {g.count > 1 && (
+                                  <span className="text-(--color-ink-soft)"> × {g.count}</span>
+                                )}
+                              </p>
+                              <p className="text-xs text-(--color-ink-soft)">{formatTimestamp(g.timestamp)}</p>
+                            </div>
+                          </div>
+                          <span
+                            className={`font-mono text-sm font-semibold ${
+                              g.amount > 0
+                                ? "text-(--color-yes-text)"
+                                : g.amount < 0
+                                  ? "text-(--color-no-text)"
+                                  : "text-(--color-ink-soft)"
+                            }`}
+                          >
+                            {g.amount > 0 ? "+" : ""}
+                            {Math.round(g.amount).toLocaleString()}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
+                  {grouped.length > statementVisible && (
+                    <button
+                      onClick={() => setStatementVisible((v) => v + STATEMENT_PAGE_SIZE)}
+                      className="mt-3 w-full rounded-xl bg-(--color-surface) py-2.5 font-display text-sm font-semibold text-(--color-ink-soft) shadow-sm shadow-black/5 transition hover:text-(--color-ink)"
+                    >
+                      Load more
+                    </button>
+                  )}
+                </>
+              );
+            })()
           )}
         </div>
       )}
