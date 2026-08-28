@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 import { hitBlackjackHand, standBlackjackHand, startBlackjackHand } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { TogglePill } from "../components/TogglePill";
+import { Avatar } from "../components/Avatar";
 import { BLACKJACK_MIN_BET, formatCard, handValue } from "../lib/blackjack";
-import type { PlayingCard } from "../types";
+import type { BlackjackHand, PlayingCard } from "../types";
 
 const CHIP_VALUES = [10, 50, 100, 500] as const;
 
@@ -100,6 +101,20 @@ export function Blackjack() {
   const playerTotal = hand ? handValue(hand.playerCards) : null;
   const dealerTotal = hand ? handValue(hand.dealerCards) : null;
   const outcomeCopy = hand?.outcome ? OUTCOME_COPY[hand.outcome] : null;
+
+  // One entry per other player — their most recent hand, so this reads as
+  // "who's at the table right now" rather than a full history dump.
+  const otherHandsByUser = new Map<string, BlackjackHand>();
+  for (const h of state.blackjackHands) {
+    if (h.userId === user.id) continue;
+    const existing = otherHandsByUser.get(h.userId);
+    if (!existing || new Date(h.createdAt).getTime() > new Date(existing.createdAt).getTime()) {
+      otherHandsByUser.set(h.userId, h);
+    }
+  }
+  const otherHands = [...otherHandsByUser.values()]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 8);
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
@@ -217,6 +232,42 @@ export function Blackjack() {
       <p className="mt-3 text-center text-xs text-(--color-ink-soft)">
         Hit or Stand only · dealer stands on all 17s · blackjack pays 3:2 · minimum bet {BLACKJACK_MIN_BET} tokens
       </p>
+
+      {otherHands.length > 0 && (
+        <div className="mt-6">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-(--color-ink-soft)">
+            Around the table
+          </h2>
+          <div className="mt-2 space-y-1.5">
+            {otherHands.map((h) => {
+              const player = state.users.find((u) => u.id === h.userId);
+              const net = h.payout !== null ? h.payout - h.betAmount : null;
+              return (
+                <div
+                  key={h.userId}
+                  className="flex items-center justify-between rounded-lg bg-(--color-surface) px-3 py-2 text-xs shadow-sm shadow-black/5"
+                >
+                  <div className="flex items-center gap-2">
+                    <Avatar name={player?.name ?? "?"} emoji={player?.avatarEmoji} color={player?.avatarColor} />
+                    <span className="font-medium text-(--color-ink)">{player?.name ?? "?"}</span>
+                  </div>
+                  {h.status === "player_turn" ? (
+                    <span className="text-(--color-ink-soft)">🎲 playing…</span>
+                  ) : (
+                    <span
+                      className={`font-mono font-medium ${
+                        net! > 0 ? "text-(--color-yes-text)" : net! < 0 ? "text-(--color-no-text)" : "text-(--color-ink-soft)"
+                      }`}
+                    >
+                      {net! > 0 ? `+${Math.round(net!)}` : Math.round(net!)}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
