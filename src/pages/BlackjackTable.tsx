@@ -276,7 +276,7 @@ export function BlackjackTable() {
               {!seat ? (
                 <button
                   type="button"
-                  disabled={busy || !!mySeat || table.status !== "betting"}
+                  disabled={busy || !!mySeat || (occupied && table.status !== "betting")}
                   onClick={() => handleJoin(i)}
                   className="flex h-full w-full items-center justify-center rounded-lg py-4 text-xs font-medium text-(--color-ink-soft) transition hover:text-(--color-ink) disabled:opacity-50"
                 >
