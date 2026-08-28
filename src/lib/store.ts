@@ -109,6 +109,22 @@ function requireClient() {
   return supabase;
 }
 
+// Every balance change goes through this — `token_balance = token_balance
+// + delta` evaluated atomically by Postgres via adjust_balance(), not
+// computed client-side from a snapshot. Two calls landing a millisecond
+// apart both read the same stale balance and each write an absolute
+// value; the second silently clobbers the first instead of compounding.
+// A full casino-games test pass found exactly this: two rapid bets, one
+// vanished with no error and no trace beyond a mismatched ledger.
+async function adjustBalance(userId: string, delta: number): Promise<User> {
+  const client = requireClient();
+  const { data, error } = await client.rpc("adjust_balance", { p_user_id: userId, p_delta: delta });
+  if (error) throw new Error(error.message);
+  const row = data?.[0];
+  if (!row) throw new Error("User not found");
+  return mapUser(row);
+}
+
 // ---- Row <-> app-type mapping (DB is snake_case, app is camelCase) ----
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -550,13 +566,10 @@ export async function checkIn(userId: string): Promise<{ amount: number; streak:
     .single();
   if (txnErr) throw new Error(`Ledger entry failed to save: ${txnErr.message}`);
 
+  await adjustBalance(userId, status.nextAmount);
   const { data: userRow, error: userErr } = await client
     .from("users")
-    .update({
-      token_balance: user.tokenBalance + status.nextAmount,
-      last_checkin_at: new Date().toISOString(),
-      checkin_streak: status.nextStreak,
-    })
+    .update({ last_checkin_at: new Date().toISOString(), checkin_streak: status.nextStreak })
     .eq("id", userId)
     .select()
     .single();
@@ -608,17 +621,11 @@ export async function borrowTokens(userId: string, amount: number): Promise<void
     .single();
   if (txnErr) throw new Error(`Loan approved but the ledger entry failed to save: ${txnErr.message}`);
 
-  const { data: userRow, error: userErr } = await client
-    .from("users")
-    .update({ token_balance: user.tokenBalance + amount })
-    .eq("id", userId)
-    .select()
-    .single();
-  if (userErr) throw new Error(userErr.message);
+  const userRow = await adjustBalance(userId, amount);
 
   setState({
     loans: upsertById(state.loans, mapLoan(loanRow)),
-    users: upsertById(state.users, mapUser(userRow)),
+    users: upsertById(state.users, userRow),
     transactions: upsertById(state.transactions, mapTransaction(txnRow)),
   });
 }
@@ -649,16 +656,10 @@ export async function repayLoan(userId: string): Promise<void> {
     .single();
   if (txnErr) throw new Error(`Loan marked repaid but the ledger entry failed to save: ${txnErr.message}`);
 
-  const { data: userRow, error: userErr } = await client
-    .from("users")
-    .update({ token_balance: user.tokenBalance - loan.amountOwed })
-    .eq("id", userId)
-    .select()
-    .single();
-  if (userErr) throw new Error(userErr.message);
+  const userRow = await adjustBalance(userId, -loan.amountOwed);
 
   setState({
-    users: upsertById(state.users, mapUser(userRow)),
+    users: upsertById(state.users, userRow),
     loans: upsertById(state.loans, mapLoan(loanRow)),
     transactions: upsertById(state.transactions, mapTransaction(txnRow)),
   });
@@ -709,13 +710,12 @@ async function collectLoanIfDue(userId: string): Promise<void> {
   if (txnErr) return; // loan status already updated; next login retries the collection
   setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 
-  const { data: userRow, error: userErr } = await client
-    .from("users")
-    .update({ token_balance: user.tokenBalance - payment })
-    .eq("id", userId)
-    .select()
-    .single();
-  if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+  try {
+    const userRow = await adjustBalance(userId, -payment);
+    setState({ users: upsertById(state.users, userRow) });
+  } catch {
+    // non-critical — next login retries the collection
+  }
 }
 
 export async function setAvatarEmoji(userId: string, emoji: string | null) {
@@ -776,40 +776,24 @@ export async function transferTokens(fromUserId: string, toUserId: string, amoun
 
   const client = requireClient();
 
-  const { data: senderRow, error: senderErr } = await client
-    .from("users")
-    .update({ token_balance: sender.tokenBalance - amount })
-    .eq("id", fromUserId)
-    .select()
-    .single();
-  if (senderErr) throw new Error(senderErr.message);
-  setState({ users: upsertById(state.users, mapUser(senderRow)) });
+  const senderRow = await adjustBalance(fromUserId, -amount);
+  setState({ users: upsertById(state.users, senderRow) });
 
   try {
-    const { data: receiverRow, error: receiverErr } = await client
-      .from("users")
-      .update({ token_balance: receiver.tokenBalance + amount })
-      .eq("id", toUserId)
-      .select()
-      .single();
-    if (receiverErr) throw new Error(receiverErr.message);
-    setState({ users: upsertById(state.users, mapUser(receiverRow)) });
+    const receiverRow = await adjustBalance(toUserId, amount);
+    setState({ users: upsertById(state.users, receiverRow) });
   } catch {
     // The sender was already debited — without this, a failure here would
     // silently destroy tokens (charged, nobody credited). Best-effort
     // compensating write to put the sender back where they started.
-    const { data: refundRow, error: refundErr } = await client
-      .from("users")
-      .update({ token_balance: sender.tokenBalance })
-      .eq("id", fromUserId)
-      .select()
-      .single();
-    if (refundErr) {
+    try {
+      const refundRow = await adjustBalance(fromUserId, amount);
+      setState({ users: upsertById(state.users, refundRow) });
+    } catch {
       throw new Error(
         "Transfer failed partway through and the automatic refund also failed — check your balance.",
       );
     }
-    setState({ users: upsertById(state.users, mapUser(refundRow)) });
     throw new Error("Transfer failed — nothing was sent, your balance is unchanged.");
   }
 
@@ -931,18 +915,12 @@ export async function placeWager(betId: string, userId: string, side: Side, amou
     .single();
   if (txnErr) throw new Error(`Wager placed but the ledger entry failed to save: ${txnErr.message}`);
 
-  const { data: userRow, error: userErr } = await client
-    .from("users")
-    .update({ token_balance: user.tokenBalance - amount })
-    .eq("id", userId)
-    .select()
-    .single();
-  if (userErr) throw new Error(userErr.message);
+  const userRow = await adjustBalance(userId, -amount);
 
   const wager = mapWager(wagerRow);
   setState({
     wagers: upsertById(state.wagers, wager),
-    users: upsertById(state.users, mapUser(userRow)),
+    users: upsertById(state.users, userRow),
     transactions: upsertById(state.transactions, mapTransaction(txnRow)),
   });
   return wager;
@@ -998,15 +976,11 @@ export async function resolveBet(betId: string, outcome: Side): Promise<void> {
       if (txnErr) continue; // this winner's payout didn't land; investigable, not silent — keep paying the rest
       setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 
-      const user = state.users.find((u) => u.id === w.userId);
-      if (user) {
-        const { data: userRow, error: userErr } = await client
-          .from("users")
-          .update({ token_balance: user.tokenBalance + payout })
-          .eq("id", user.id)
-          .select()
-          .single();
-        if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+      try {
+        const userRow = await adjustBalance(w.userId, payout);
+        setState({ users: upsertById(state.users, userRow) });
+      } catch {
+        // non-critical — this payout's balance move didn't land, keep paying the rest
       }
     }
   }
@@ -1049,15 +1023,11 @@ export async function voidBet(betId: string): Promise<void> {
     if (txnErr) continue; // this refund didn't land; investigable, not silent — keep refunding the rest
     setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 
-    const user = state.users.find((u) => u.id === w.userId);
-    if (user) {
-      const { data: userRow, error: userErr } = await client
-        .from("users")
-        .update({ token_balance: user.tokenBalance + w.amount })
-        .eq("id", user.id)
-        .select()
-        .single();
-      if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+    try {
+      const userRow = await adjustBalance(w.userId, w.amount);
+      setState({ users: upsertById(state.users, userRow) });
+    } catch {
+      // non-critical — this refund's balance move didn't land, keep refunding the rest
     }
   }
 }
@@ -1087,15 +1057,11 @@ export async function deleteBet(betId: string, requestingUserId: string): Promis
     if (txnErr) continue; // this refund didn't land; investigable, not silent — keep refunding the rest
     setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 
-    const user = state.users.find((u) => u.id === w.userId);
-    if (user) {
-      const { data: userRow, error: userErr } = await client
-        .from("users")
-        .update({ token_balance: user.tokenBalance + w.amount })
-        .eq("id", user.id)
-        .select()
-        .single();
-      if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+    try {
+      const userRow = await adjustBalance(w.userId, w.amount);
+      setState({ users: upsertById(state.users, userRow) });
+    } catch {
+      // non-critical — this refund's balance move didn't land, keep refunding the rest
     }
   }
 
@@ -1173,15 +1139,11 @@ export async function reResolve(betId: string, outcome: Side) {
     if (txnErr) continue; // this reversal didn't land; investigable, not silent — keep reversing the rest
     setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 
-    const user = state.users.find((u) => u.id === w.userId);
-    if (user) {
-      const { data: userRow, error: userErr } = await client
-        .from("users")
-        .update({ token_balance: user.tokenBalance - w.payout })
-        .eq("id", user.id)
-        .select()
-        .single();
-      if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+    try {
+      const userRow = await adjustBalance(w.userId, -w.payout);
+      setState({ users: upsertById(state.users, userRow) });
+    } catch {
+      // non-critical — this reversal's balance move didn't land, keep reversing the rest
     }
 
     const { data: wagerRow, error: wagerErr } = await client
@@ -1354,15 +1316,11 @@ export async function resolveRouletteRound(roundId: string): Promise<void> {
     if (txnErr) continue; // this payout didn't land; investigable, not silent — keep paying the rest
     setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 
-    const user = state.users.find((u) => u.id === bet.userId);
-    if (user) {
-      const { data: userRow, error: userErr } = await client
-        .from("users")
-        .update({ token_balance: user.tokenBalance + payout })
-        .eq("id", user.id)
-        .select()
-        .single();
-      if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+    try {
+      const userRow = await adjustBalance(bet.userId, payout);
+      setState({ users: upsertById(state.users, userRow) });
+    } catch {
+      // non-critical — this payout's balance move didn't land, keep paying the rest
     }
   }
 }
@@ -1403,17 +1361,11 @@ export async function placeRouletteBet(
     .single();
   if (txnErr) throw new Error(`Bet placed but the ledger entry failed to save: ${txnErr.message}`);
 
-  const { data: userRow, error: userErr } = await client
-    .from("users")
-    .update({ token_balance: user.tokenBalance - amount })
-    .eq("id", userId)
-    .select()
-    .single();
-  if (userErr) throw new Error(userErr.message);
+  const userRow = await adjustBalance(userId, -amount);
 
   setState({
     rouletteBets: upsertById(state.rouletteBets, mapRouletteBet(betRow)),
-    users: upsertById(state.users, mapUser(userRow)),
+    users: upsertById(state.users, userRow),
     transactions: upsertById(state.transactions, mapTransaction(txnRow)),
   });
 }
@@ -1451,18 +1403,12 @@ export async function spinSlots(userId: string, amount: number): Promise<SlotsSp
     .single();
   if (txnErr) throw new Error(`Spin landed but the ledger entry failed to save: ${txnErr.message}`);
 
-  const { data: userRow, error: userErr } = await client
-    .from("users")
-    .update({ token_balance: user.tokenBalance + net })
-    .eq("id", userId)
-    .select()
-    .single();
-  if (userErr) throw new Error(userErr.message);
+  const userRow = await adjustBalance(userId, net);
 
   const spin = mapSlotsSpin(spinRow);
   setState({
     slotsSpins: upsertById(state.slotsSpins, spin),
-    users: upsertById(state.users, mapUser(userRow)),
+    users: upsertById(state.users, userRow),
     transactions: upsertById(state.transactions, mapTransaction(txnRow)),
   });
   return spin;
@@ -1505,18 +1451,12 @@ export async function startBlackjackHand(userId: string, betAmount: number): Pro
     .single();
   if (txnErr) throw new Error(`Hand dealt but the ledger entry failed to save: ${txnErr.message}`);
 
-  const { data: userRow, error: userErr } = await client
-    .from("users")
-    .update({ token_balance: user.tokenBalance - betAmount })
-    .eq("id", userId)
-    .select()
-    .single();
-  if (userErr) throw new Error(userErr.message);
+  const userRow = await adjustBalance(userId, -betAmount);
 
   const hand = mapBlackjackHand(handRow);
   setState({
     blackjackHands: upsertById(state.blackjackHands, hand),
-    users: upsertById(state.users, mapUser(userRow)),
+    users: upsertById(state.users, userRow),
     transactions: upsertById(state.transactions, mapTransaction(txnRow)),
   });
 
@@ -1600,15 +1540,11 @@ async function finishBlackjackHand(handId: string, playerCards: PlayingCard[]): 
     if (txnErr) return resolved; // payout didn't land; investigable, not silent
     setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
 
-    const user = state.users.find((u) => u.id === hand.userId);
-    if (user) {
-      const { data: userRow, error: userErr } = await client
-        .from("users")
-        .update({ token_balance: user.tokenBalance + payout })
-        .eq("id", user.id)
-        .select()
-        .single();
-      if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+    try {
+      const userRow = await adjustBalance(hand.userId, payout);
+      setState({ users: upsertById(state.users, userRow) });
+    } catch {
+      // non-critical — payout's balance move didn't land, investigable via the ledger
     }
   }
   return resolved;
