@@ -54,7 +54,8 @@ export type TransactionType =
   | "transfer"
   | "roulette"
   | "loan"
-  | "repayment";
+  | "repayment"
+  | "adjustment";
 
 export interface Transaction {
   id: string;
