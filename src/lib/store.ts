@@ -4,17 +4,22 @@ import type {
   Bet,
   BetCategory,
   BetStatus,
+  BlackjackHand,
   Comment,
   Loan,
+  PlayingCard,
   RouletteBet,
   RouletteBetType,
   RouletteRound,
   Side,
+  SlotsSpin,
   Transaction,
   User,
   Wager,
 } from "../types";
 import { ROULETTE_MIN_BET, calculatePayout, rollLuckyNumbers, rollWinningNumber } from "./roulette";
+import { SLOTS_MIN_BET, calculateSlotsPayout, rollReels } from "./slots";
+import { BLACKJACK_MIN_BET, drawCard, isBlackjack, isBust, playDealerHand, resolveHand } from "./blackjack";
 
 /**
  * Supabase-backed data layer (see supabase/schema.sql +
@@ -80,6 +85,8 @@ interface State {
   rouletteRounds: RouletteRound[];
   rouletteBets: RouletteBet[];
   loans: Loan[];
+  slotsSpins: SlotsSpin[];
+  blackjackHands: BlackjackHand[];
   loading: boolean;
   error: string | null;
   stipendAlert: StipendAlert | null;
@@ -94,6 +101,8 @@ let state: State = {
   rouletteRounds: [],
   rouletteBets: [],
   loans: [],
+  slotsSpins: [],
+  blackjackHands: [],
   loading: true,
   error: null,
   stipendAlert: null,
@@ -211,6 +220,30 @@ function mapLoan(row: Row): Loan {
     repaidAt: row.repaid_at ?? null,
   };
 }
+function mapSlotsSpin(row: Row): SlotsSpin {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    amount: Number(row.amount),
+    reels: row.reels,
+    payout: Number(row.payout),
+    createdAt: row.created_at,
+  };
+}
+function mapBlackjackHand(row: Row): BlackjackHand {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    betAmount: Number(row.bet_amount),
+    playerCards: row.player_cards,
+    dealerCards: row.dealer_cards,
+    status: row.status,
+    outcome: row.outcome ?? null,
+    payout: row.payout === null ? null : Number(row.payout),
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at ?? null,
+  };
+}
 
 function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   const idx = list.findIndex((x) => x.id === item.id);
@@ -262,6 +295,30 @@ async function fetchAll() {
   // missing table here shouldn't take down Feed/bets/profile.
   await pollRoulette();
   await fetchLoans();
+  await fetchSlotsSpins();
+  await fetchBlackjackHands();
+}
+
+async function fetchSlotsSpins() {
+  const client = requireClient();
+  const { data, error } = await client
+    .from("slots_spins")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) return;
+  setState({ slotsSpins: (data ?? []).map(mapSlotsSpin) });
+}
+
+async function fetchBlackjackHands() {
+  const client = requireClient();
+  const { data, error } = await client
+    .from("blackjack_hands")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) return;
+  setState({ blackjackHands: (data ?? []).map(mapBlackjackHand) });
 }
 
 async function fetchLoans() {
@@ -374,6 +431,12 @@ export async function initStore() {
     .on("postgres_changes", { event: "*", schema: "public", table: "loans" }, (payload) =>
       applyChange(payload, "loans", mapLoan),
     )
+    .on("postgres_changes", { event: "*", schema: "public", table: "slots_spins" }, (payload) =>
+      applyChange(payload, "slotsSpins", mapSlotsSpin),
+    )
+    .on("postgres_changes", { event: "*", schema: "public", table: "blackjack_hands" }, (payload) =>
+      applyChange(payload, "blackjackHands", mapBlackjackHand),
+    )
     .subscribe();
 
   setInterval(() => {
@@ -396,7 +459,9 @@ function applyChange<
     | "comments"
     | "rouletteRounds"
     | "rouletteBets"
-    | "loans",
+    | "loans"
+    | "slotsSpins"
+    | "blackjackHands",
 >(
   payload: RealtimePostgresChangesPayload<Row>,
   key: K,
@@ -1392,4 +1457,200 @@ export async function placeRouletteBet(
     users: upsertById(state.users, mapUser(userRow)),
     transactions: upsertById(state.transactions, mapTransaction(txnRow)),
   });
+}
+
+// ---- Slots ----
+// Single-player, instant resolve — no shared round needed.
+
+export async function spinSlots(userId: string, amount: number): Promise<SlotsSpin> {
+  const user = state.users.find((u) => u.id === userId);
+  if (!user) throw new Error("User not found");
+  if (!Number.isInteger(amount) || amount < SLOTS_MIN_BET) {
+    throw new Error(`Bets must be a whole number of at least ${SLOTS_MIN_BET} tokens`);
+  }
+  if (amount > user.tokenBalance) throw new Error("Insufficient balance");
+
+  const reels = rollReels();
+  const payout = calculateSlotsPayout(reels, amount);
+  const client = requireClient();
+
+  const { data: spinRow, error: spinErr } = await client
+    .from("slots_spins")
+    .insert({ user_id: userId, amount, reels, payout })
+    .select()
+    .single();
+  if (spinErr) throw new Error(spinErr.message);
+
+  // Ledger entry before the balance move — see placeWager for why. A
+  // single net entry (payout minus stake) since both happen atomically in
+  // one client action, unlike roulette's multi-phase round.
+  const net = payout - amount;
+  const { data: txnRow, error: txnErr } = await client
+    .from("transactions")
+    .insert({ user_id: userId, type: "slots", amount: net })
+    .select()
+    .single();
+  if (txnErr) throw new Error(`Spin landed but the ledger entry failed to save: ${txnErr.message}`);
+
+  const { data: userRow, error: userErr } = await client
+    .from("users")
+    .update({ token_balance: user.tokenBalance + net })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (userErr) throw new Error(userErr.message);
+
+  const spin = mapSlotsSpin(spinRow);
+  setState({
+    slotsSpins: upsertById(state.slotsSpins, spin),
+    users: upsertById(state.users, mapUser(userRow)),
+    transactions: upsertById(state.transactions, mapTransaction(txnRow)),
+  });
+  return spin;
+}
+
+// ---- Blackjack ----
+// Single-player, turn-driven — a sequence of hit/stand actions against a
+// dealer that plays automatically once the player stands or busts. No
+// shared round or timer needed, same as slots.
+
+export function activeBlackjackHandFor(userId: string): BlackjackHand | null {
+  return state.blackjackHands.find((h) => h.userId === userId && h.status === "player_turn") ?? null;
+}
+
+export async function startBlackjackHand(userId: string, betAmount: number): Promise<BlackjackHand> {
+  const user = state.users.find((u) => u.id === userId);
+  if (!user) throw new Error("User not found");
+  if (activeBlackjackHandFor(userId)) throw new Error("Finish your current hand first");
+  if (!Number.isInteger(betAmount) || betAmount < BLACKJACK_MIN_BET) {
+    throw new Error(`Bets must be a whole number of at least ${BLACKJACK_MIN_BET} tokens`);
+  }
+  if (betAmount > user.tokenBalance) throw new Error("Insufficient balance");
+
+  const playerCards = [drawCard(), drawCard()];
+  const dealerCards = [drawCard(), drawCard()];
+  const client = requireClient();
+
+  const { data: handRow, error: handErr } = await client
+    .from("blackjack_hands")
+    .insert({ user_id: userId, bet_amount: betAmount, player_cards: playerCards, dealer_cards: dealerCards })
+    .select()
+    .single();
+  if (handErr) throw new Error(handErr.message);
+
+  // Ledger entry before the balance move — see placeWager for why.
+  const { data: txnRow, error: txnErr } = await client
+    .from("transactions")
+    .insert({ user_id: userId, type: "blackjack", amount: -betAmount })
+    .select()
+    .single();
+  if (txnErr) throw new Error(`Hand dealt but the ledger entry failed to save: ${txnErr.message}`);
+
+  const { data: userRow, error: userErr } = await client
+    .from("users")
+    .update({ token_balance: user.tokenBalance - betAmount })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (userErr) throw new Error(userErr.message);
+
+  const hand = mapBlackjackHand(handRow);
+  setState({
+    blackjackHands: upsertById(state.blackjackHands, hand),
+    users: upsertById(state.users, mapUser(userRow)),
+    transactions: upsertById(state.transactions, mapTransaction(txnRow)),
+  });
+
+  // A natural blackjack ends the hand immediately — no decisions to make.
+  if (isBlackjack(playerCards)) {
+    return finishBlackjackHand(hand.id, playerCards);
+  }
+  return hand;
+}
+
+export async function hitBlackjackHand(handId: string): Promise<BlackjackHand> {
+  const hand = state.blackjackHands.find((h) => h.id === handId);
+  if (!hand) throw new Error("Hand not found");
+  if (hand.status !== "player_turn") throw new Error("This hand is already settled");
+
+  const playerCards = [...hand.playerCards, drawCard()];
+  if (isBust(playerCards)) {
+    return finishBlackjackHand(handId, playerCards);
+  }
+
+  const client = requireClient();
+  const { data: handRow, error } = await client
+    .from("blackjack_hands")
+    .update({ player_cards: playerCards })
+    .eq("id", handId)
+    .eq("status", "player_turn")
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!handRow) throw new Error("This hand is already settled");
+  const updated = mapBlackjackHand(handRow);
+  setState({ blackjackHands: upsertById(state.blackjackHands, updated) });
+  return updated;
+}
+
+export async function standBlackjackHand(handId: string): Promise<BlackjackHand> {
+  const hand = state.blackjackHands.find((h) => h.id === handId);
+  if (!hand) throw new Error("Hand not found");
+  if (hand.status !== "player_turn") throw new Error("This hand is already settled");
+  return finishBlackjackHand(handId, hand.playerCards);
+}
+
+// Dealer only draws further if the player didn't bust and doesn't have a
+// natural blackjack (a 2-card 21 can only ever be natural — a hit-derived
+// 21 has 3+ cards, so isBlackjack's length check alone tells them apart).
+async function finishBlackjackHand(handId: string, playerCards: PlayingCard[]): Promise<BlackjackHand> {
+  const hand = state.blackjackHands.find((h) => h.id === handId);
+  if (!hand) throw new Error("Hand not found");
+
+  const dealerCards =
+    isBust(playerCards) || isBlackjack(playerCards) ? hand.dealerCards : playDealerHand(hand.dealerCards);
+  const { outcome, payout } = resolveHand(playerCards, dealerCards, hand.betAmount);
+
+  const client = requireClient();
+  const { data: handRow, error: handErr } = await client
+    .from("blackjack_hands")
+    .update({
+      player_cards: playerCards,
+      dealer_cards: dealerCards,
+      status: "resolved",
+      outcome,
+      payout,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq("id", handId)
+    .eq("status", "player_turn")
+    .select()
+    .maybeSingle();
+  if (handErr) throw new Error(handErr.message);
+  if (!handRow) throw new Error("This hand is already settled");
+  const resolved = mapBlackjackHand(handRow);
+  setState({ blackjackHands: upsertById(state.blackjackHands, resolved) });
+
+  if (payout > 0) {
+    // Ledger entry before the balance move — see placeWager for why.
+    const { data: txnRow, error: txnErr } = await client
+      .from("transactions")
+      .insert({ user_id: hand.userId, type: "blackjack", amount: payout })
+      .select()
+      .single();
+    if (txnErr) return resolved; // payout didn't land; investigable, not silent
+    setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
+
+    const user = state.users.find((u) => u.id === hand.userId);
+    if (user) {
+      const { data: userRow, error: userErr } = await client
+        .from("users")
+        .update({ token_balance: user.tokenBalance + payout })
+        .eq("id", user.id)
+        .select()
+        .single();
+      if (!userErr) setState({ users: upsertById(state.users, mapUser(userRow)) });
+    }
+  }
+  return resolved;
 }

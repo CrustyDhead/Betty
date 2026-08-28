@@ -38,6 +38,8 @@ const TRANSACTION_LABEL: Record<TransactionType, { emoji: string; label: string 
   loan: { emoji: "🏦", label: "Loan" },
   repayment: { emoji: "🧾", label: "Loan repayment" },
   adjustment: { emoji: "⚖️", label: "Balance adjustment" },
+  slots: { emoji: "🎰", label: "Slots" },
+  blackjack: { emoji: "🃏", label: "Blackjack" },
 };
 
 const TIER_EMOJI: Record<string, string> = {

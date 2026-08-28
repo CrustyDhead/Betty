@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   closeRouletteBettingIfDue,
   currentRouletteRound,
@@ -159,7 +160,10 @@ export function Roulette() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
-      <h1 className="font-display text-xl font-semibold text-(--color-ink)">Roulette</h1>
+      <Link to="/casino" className="text-sm font-medium text-(--color-ink-soft) hover:text-(--color-ink)">
+        ← Casino
+      </Link>
+      <h1 className="mt-2 font-display text-xl font-semibold text-(--color-ink)">Roulette</h1>
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
         {round.status === "betting" && (

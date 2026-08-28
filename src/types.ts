@@ -55,7 +55,9 @@ export type TransactionType =
   | "roulette"
   | "loan"
   | "repayment"
-  | "adjustment";
+  | "adjustment"
+  | "slots"
+  | "blackjack";
 
 export interface Transaction {
   id: string;
@@ -110,4 +112,36 @@ export interface Loan {
   borrowedAt: string;
   dueAt: string;
   repaidAt: string | null;
+}
+
+export interface SlotsSpin {
+  id: string;
+  userId: string;
+  amount: number;
+  reels: string[];
+  payout: number;
+  createdAt: string;
+}
+
+export type Suit = "♠" | "♥" | "♦" | "♣";
+
+export interface PlayingCard {
+  rank: "A" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10" | "J" | "Q" | "K";
+  suit: Suit;
+}
+
+export type BlackjackStatus = "player_turn" | "resolved";
+export type BlackjackOutcome = "win" | "lose" | "push" | "blackjack";
+
+export interface BlackjackHand {
+  id: string;
+  userId: string;
+  betAmount: number;
+  playerCards: PlayingCard[];
+  dealerCards: PlayingCard[];
+  status: BlackjackStatus;
+  outcome: BlackjackOutcome | null;
+  payout: number | null;
+  createdAt: string;
+  resolvedAt: string | null;
 }

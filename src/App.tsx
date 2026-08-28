@@ -11,7 +11,10 @@ import { CreateBet } from "./pages/CreateBet";
 import { MyBets } from "./pages/MyBets";
 import { Leaderboard } from "./pages/Leaderboard";
 import { Profile } from "./pages/Profile";
+import { Casino } from "./pages/Casino";
 import { Roulette } from "./pages/Roulette";
+import { Slots } from "./pages/Slots";
+import { Blackjack } from "./pages/Blackjack";
 
 export default function App() {
   const state = useStoreState();
@@ -51,7 +54,10 @@ export default function App() {
         <Route path="/create" element={<CreateBet />} />
         <Route path="/my-bets" element={<MyBets />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
-        <Route path="/roulette" element={<Roulette />} />
+        <Route path="/casino" element={<Casino />} />
+        <Route path="/casino/roulette" element={<Roulette />} />
+        <Route path="/casino/slots" element={<Slots />} />
+        <Route path="/casino/blackjack" element={<Blackjack />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/profile/:userId" element={<Profile />} />
       </Routes>
