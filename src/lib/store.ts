@@ -36,9 +36,7 @@ import { BLACKJACK_MIN_BET, drawCard, isBlackjack, isBust, playDealerHand, resol
 const CURRENT_USER_KEY = "office-bets/current-user";
 
 export const STARTING_BALANCE = 1000;
-export const WEEKLY_STIPEND = 100;
 export const MIN_WAGER = 10;
-export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 // House-issued loans, not peer-to-peer — avoids real interpersonal debt
 // over fake tokens. Flat (non-compounding) interest: borrow 200 -> owe
@@ -49,32 +47,15 @@ export const LOAN_CAP = 2000;
 export const LOAN_INTEREST_RATE = 0.1;
 export const LOAN_TERM_MS = 7 * 24 * 60 * 60 * 1000;
 
-// Everyone's stipend is flat for the app's first week live, so nobody's
-// early impression of the game is "why did I get less than them" before
-// there's been any real activity to base it on. After that, it scales with
-// how many wagers you placed in the trailing 7 days — reads as "play more,
-// earn more" instead of pure luck.
-export const LAUNCH_DATE = new Date("2026-08-21T00:00:00Z").getTime();
-
-export interface EngagementTier {
-  kind: "quiet" | "steady" | "active" | "on_fire";
-  label: string;
-  minWagers: number;
-  amount: number;
-}
-
-// Ordered lowest-engagement first.
-export const ENGAGEMENT_TIERS: EngagementTier[] = [
-  { kind: "quiet", label: "Quiet week", minWagers: 0, amount: 50 },
-  { kind: "steady", label: "Steady", minWagers: 1, amount: 100 },
-  { kind: "active", label: "Active", minWagers: 3, amount: 150 },
-  { kind: "on_fire", label: "On fire", minWagers: 5, amount: 250 },
-];
-
-export interface StipendAlert {
-  amount: number;
-  kind: "flat" | EngagementTier["kind"];
-}
+// Daily check-in replaces the old weekly auto-stipend — an explicit action
+// each day instead of a passive grant, so it actually rewards coming back.
+// A streak (consecutive days, missing one resets it) gets a bonus every
+// 7-day milestone.
+export const CHECKIN_AMOUNT = 50;
+export const CHECKIN_STREAK_BONUS = 200;
+export const CHECKIN_STREAK_BONUS_EVERY = 7;
+const CHECKIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const CHECKIN_STREAK_GRACE_MS = 48 * 60 * 60 * 1000;
 
 interface State {
   users: User[];
@@ -89,7 +70,6 @@ interface State {
   blackjackHands: BlackjackHand[];
   loading: boolean;
   error: string | null;
-  stipendAlert: StipendAlert | null;
 }
 
 let state: State = {
@@ -105,7 +85,6 @@ let state: State = {
   blackjackHands: [],
   loading: true,
   error: null,
-  stipendAlert: null,
 };
 const listeners = new Set<() => void>();
 
@@ -142,7 +121,8 @@ function mapUser(row: Row): User {
     tokenBalance: Number(row.token_balance),
     avatarEmoji: row.avatar_emoji ?? null,
     avatarColor: row.avatar_color ?? null,
-    lastStipendAt: row.last_stipend_at ?? null,
+    lastCheckinAt: row.last_checkin_at ?? null,
+    checkinStreak: row.checkin_streak ?? 0,
   };
 }
 function mapBet(row: Row): Bet {
@@ -516,7 +496,6 @@ export async function login(name: string): Promise<User> {
   localStorage.setItem(CURRENT_USER_KEY, user.id);
   listeners.forEach((l) => l());
 
-  await applyWeeklyStipendIfDue(user, existing?.last_stipend_at ?? null);
   await collectLoanIfDue(user.id);
   return user;
 }
@@ -526,88 +505,68 @@ export function logout() {
   listeners.forEach((l) => l());
 }
 
-export function isFlatStipendWeek(now = Date.now()): boolean {
-  return now < LAUNCH_DATE + WEEK_MS;
+// ---- Daily check-in ----
+
+export interface CheckinStatus {
+  eligible: boolean;
+  nextEligibleAt: number | null; // ms epoch; null when eligible now
+  streak: number; // current streak, before today's check-in
+  nextStreak: number; // streak today's check-in would produce
+  nextAmount: number;
+  nextIsBonus: boolean;
 }
 
-// How many wagers a user placed in the trailing 7 days — the engagement
-// signal the stipend tier is based on once the flat first week is over.
-export function weeklyWagerCount(userId: string, now = Date.now()): number {
-  const cutoff = now - WEEK_MS;
-  return state.transactions.filter(
-    (t) => t.userId === userId && t.type === "wager" && new Date(t.timestamp).getTime() >= cutoff,
-  ).length;
-}
-
-export function engagementTierFor(wagerCount: number): EngagementTier {
-  let tier = ENGAGEMENT_TIERS[0];
-  for (const t of ENGAGEMENT_TIERS) {
-    if (wagerCount >= t.minWagers) tier = t;
-  }
-  return tier;
-}
-
-// What a user's next weekly stipend will be if collected right now — used
-// both to actually roll it at login and to preview it in the Profile Token
-// tab, so the two can never drift apart.
-export function projectedStipend(
-  userId: string,
-  now = Date.now(),
-): { amount: number; kind: StipendAlert["kind"]; tier: EngagementTier | null; wagerCount: number } {
-  const wagerCount = weeklyWagerCount(userId, now);
-  if (isFlatStipendWeek(now)) {
-    return { amount: WEEKLY_STIPEND, kind: "flat", tier: null, wagerCount };
-  }
-  const tier = engagementTierFor(wagerCount);
-  return { amount: tier.amount, kind: tier.kind, tier, wagerCount };
-}
-
-// When a user's next stipend is due — same rule applyWeeklyStipendIfDue
-// checks at login (a week after their last one, or immediately if they've
-// never gotten one), just exposed for display.
-export function nextStipendAt(userId: string): number | null {
+export function checkinStatusFor(userId: string, now = Date.now()): CheckinStatus | null {
   const user = state.users.find((u) => u.id === userId);
   if (!user) return null;
-  if (!user.lastStipendAt) return Date.now();
-  return new Date(user.lastStipendAt).getTime() + WEEK_MS;
+
+  const last = user.lastCheckinAt ? new Date(user.lastCheckinAt).getTime() : null;
+  const eligible = last === null || now - last >= CHECKIN_COOLDOWN_MS;
+  const nextEligibleAt = eligible ? null : last! + CHECKIN_COOLDOWN_MS;
+
+  // Streak continues if they're checking in within the grace window of
+  // their last one; missing a full day resets it to a fresh streak of 1.
+  const streakContinues = last !== null && now - last <= CHECKIN_STREAK_GRACE_MS;
+  const nextStreak = streakContinues ? user.checkinStreak + 1 : 1;
+  const nextIsBonus = nextStreak % CHECKIN_STREAK_BONUS_EVERY === 0;
+  const nextAmount = CHECKIN_AMOUNT + (nextIsBonus ? CHECKIN_STREAK_BONUS : 0);
+
+  return { eligible, nextEligibleAt, streak: user.checkinStreak, nextStreak, nextAmount, nextIsBonus };
 }
 
-async function applyWeeklyStipendIfDue(user: User, lastStipendAt: string | null) {
-  const due = !lastStipendAt || Date.now() - new Date(lastStipendAt).getTime() > WEEK_MS;
-  if (!due) return;
+export async function checkIn(userId: string): Promise<{ amount: number; streak: number; bonus: boolean }> {
+  const user = state.users.find((u) => u.id === userId);
+  if (!user) throw new Error("User not found");
+  const status = checkinStatusFor(userId);
+  if (!status?.eligible) throw new Error("Already checked in — come back later");
 
-  const { amount, kind } = projectedStipend(user.id);
-  const stipend: StipendAlert = { amount, kind };
   const client = requireClient();
 
-  // Ledger entry first: if this fails, nothing has happened yet (balance
-  // untouched, due-check unaffected, safe to retry next login). Doing the
-  // balance update first would risk crediting tokens with no ledger trace
-  // if the insert below then failed — a silent, unrecoverable gap.
+  // Ledger entry before the balance move — see placeWager for why.
   const { data: txnRow, error: txnErr } = await client
     .from("transactions")
-    .insert({ user_id: user.id, type: "stipend", amount: stipend.amount })
+    .insert({ user_id: userId, type: "checkin", amount: status.nextAmount })
     .select()
     .single();
-  if (txnErr) return; // non-critical — don't block login over a missed stipend
+  if (txnErr) throw new Error(`Ledger entry failed to save: ${txnErr.message}`);
 
-  const { data: updated, error } = await client
+  const { data: userRow, error: userErr } = await client
     .from("users")
-    .update({ token_balance: user.tokenBalance + stipend.amount, last_stipend_at: new Date().toISOString() })
-    .eq("id", user.id)
+    .update({
+      token_balance: user.tokenBalance + status.nextAmount,
+      last_checkin_at: new Date().toISOString(),
+      checkin_streak: status.nextStreak,
+    })
+    .eq("id", userId)
     .select()
     .single();
-  if (error) return; // ledger entry exists but balance didn't move — visible, investigable, not silent
+  if (userErr) throw new Error(userErr.message);
 
   setState({
-    users: upsertById(state.users, mapUser(updated)),
-    stipendAlert: stipend,
+    users: upsertById(state.users, mapUser(userRow)),
     transactions: upsertById(state.transactions, mapTransaction(txnRow)),
   });
-}
-
-export function clearStipendAlert() {
-  setState({ stipendAlert: null });
+  return { amount: status.nextAmount, streak: status.nextStreak, bonus: status.nextIsBonus };
 }
 
 // ---- Loans ----

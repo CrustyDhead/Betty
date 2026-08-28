@@ -3,7 +3,6 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { initStore } from "./lib/store";
 import { useCurrentUser, useStoreState } from "./lib/useStore";
 import { NavBar } from "./components/NavBar";
-import { StipendToast } from "./components/StipendToast";
 import { Login } from "./pages/Login";
 import { Feed } from "./pages/Feed";
 import { BetDetail } from "./pages/BetDetail";
@@ -46,7 +45,6 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <StipendToast />
       <NavBar />
       <Routes>
         <Route path="/" element={<Feed />} />

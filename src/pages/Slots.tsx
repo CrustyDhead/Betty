@@ -59,18 +59,12 @@ export function Slots() {
         {lastPayout && (
           <p
             className={`mt-4 font-display text-sm font-semibold ${
-              lastPayout.payout > lastPayout.amount
-                ? "text-(--color-yes-text)"
-                : lastPayout.payout === lastPayout.amount
-                  ? "text-(--color-ink-soft)"
-                  : "text-(--color-no-text)"
+              lastPayout.payout > 0 ? "text-(--color-yes-text)" : "text-(--color-no-text)"
             }`}
           >
-            {lastPayout.payout > lastPayout.amount
+            {lastPayout.payout > 0
               ? `You won ${Math.round(lastPayout.payout - lastPayout.amount)} tokens! 🎉`
-              : lastPayout.payout === lastPayout.amount
-                ? "So close — stake back."
-                : `Lost ${lastPayout.amount} tokens.`}
+              : `Lost ${lastPayout.amount} tokens.`}
           </p>
         )}
 
@@ -120,7 +114,7 @@ export function Slots() {
           ))}
           <div className="flex items-center justify-between rounded-lg bg-(--color-surface) px-3 py-1.5 text-xs shadow-sm shadow-black/5">
             <span>Any 2 matching</span>
-            <span className="font-mono text-(--color-ink-soft)">1x (stake back)</span>
+            <span className="font-mono text-(--color-ink-soft)">1.5x</span>
           </div>
         </div>
         <p className="mt-2 text-xs text-(--color-ink-soft)">Minimum bet {SLOTS_MIN_BET} tokens.</p>

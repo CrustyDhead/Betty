@@ -8,7 +8,8 @@ export interface User {
   tokenBalance: number;
   avatarEmoji: string | null;
   avatarColor: string | null;
-  lastStipendAt: string | null;
+  lastCheckinAt: string | null;
+  checkinStreak: number;
 }
 
 export interface Bet {
@@ -57,7 +58,8 @@ export type TransactionType =
   | "repayment"
   | "adjustment"
   | "slots"
-  | "blackjack";
+  | "blackjack"
+  | "checkin";
 
 export interface Transaction {
   id: string;
