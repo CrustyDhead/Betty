@@ -8,6 +8,7 @@ export interface User {
   tokenBalance: number;
   avatarEmoji: string | null;
   avatarColor: string | null;
+  lastStipendAt: string | null;
 }
 
 export interface Bet {

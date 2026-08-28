@@ -11,6 +11,7 @@ import {
   borrowTokens,
   currentStreak,
   logout,
+  nextStipendAt,
   notificationPermission,
   projectedStipend,
   renameUser,
@@ -107,6 +108,7 @@ export function Profile() {
   const streak = currentStreak(viewedUser.id);
   const transactions = userTransactions(viewedUser.id);
   const stipend = projectedStipend(viewedUser.id);
+  const nextStipendDate = nextStipendAt(viewedUser.id);
   const loan = activeLoanFor(viewedUser.id);
 
   const badges: { label: string; emoji: string }[] = [];
@@ -307,6 +309,11 @@ export function Profile() {
                   {isOwn ? "you place" : `${viewedUser.name} places`} in the past 7 days — more action, bigger
                   top-up.
                 </p>
+                {nextStipendDate !== null && (
+                  <p className="mt-1.5 text-xs text-(--color-ink-soft)">
+                    Next payout: {formatDate(nextStipendDate)}
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -318,6 +325,11 @@ export function Profile() {
                     <p className="text-xs text-(--color-ink-soft)">
                       {stipend.wagerCount} wager{stipend.wagerCount === 1 ? "" : "s"} in the last 7 days
                     </p>
+                    {nextStipendDate !== null && (
+                      <p className="mt-1 text-xs text-(--color-ink-soft)">
+                        Next payout: {formatDate(nextStipendDate)}
+                      </p>
+                    )}
                   </div>
                   <p className="text-right font-mono text-lg font-semibold text-(--color-ink)">
                     +{stipend.amount}

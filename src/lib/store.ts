@@ -33,7 +33,7 @@ const CURRENT_USER_KEY = "office-bets/current-user";
 export const STARTING_BALANCE = 1000;
 export const WEEKLY_STIPEND = 100;
 export const MIN_WAGER = 10;
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 // House-issued loans, not peer-to-peer — avoids real interpersonal debt
 // over fake tokens. Flat (non-compounding) interest: borrow 200 -> owe
@@ -133,6 +133,7 @@ function mapUser(row: Row): User {
     tokenBalance: Number(row.token_balance),
     avatarEmoji: row.avatar_emoji ?? null,
     avatarColor: row.avatar_color ?? null,
+    lastStipendAt: row.last_stipend_at ?? null,
   };
 }
 function mapBet(row: Row): Bet {
@@ -494,6 +495,16 @@ export function projectedStipend(
   }
   const tier = engagementTierFor(wagerCount);
   return { amount: tier.amount, kind: tier.kind, tier, wagerCount };
+}
+
+// When a user's next stipend is due — same rule applyWeeklyStipendIfDue
+// checks at login (a week after their last one, or immediately if they've
+// never gotten one), just exposed for display.
+export function nextStipendAt(userId: string): number | null {
+  const user = state.users.find((u) => u.id === userId);
+  if (!user) return null;
+  if (!user.lastStipendAt) return Date.now();
+  return new Date(user.lastStipendAt).getTime() + WEEK_MS;
 }
 
 async function applyWeeklyStipendIfDue(user: User, lastStipendAt: string | null) {
