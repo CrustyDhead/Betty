@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { HelpButton, HelpModal } from "../components/HelpModal";
 import {
   closeRouletteBettingIfDue,
   currentRouletteRound,
@@ -15,6 +16,7 @@ import {
   ROULETTE_BETTING_MS,
   ROULETTE_CHIP_VALUES,
   ROULETTE_LUCKY_REVEAL_MS,
+  ROULETTE_MIN_BET,
   ROULETTE_SPIN_MS,
   numberColor,
 } from "../lib/roulette";
@@ -50,6 +52,7 @@ export function Roulette() {
   const round = currentRouletteRound();
 
   const [chip, setChip] = useState<(typeof ROULETTE_CHIP_VALUES)[number]>(10);
+  const [showHelp, setShowHelp] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -163,7 +166,31 @@ export function Roulette() {
       <Link to="/casino" className="text-sm font-medium text-(--color-ink-soft) hover:text-(--color-ink)">
         ← Casino
       </Link>
-      <h1 className="mt-2 font-display text-xl font-semibold text-(--color-ink)">Roulette</h1>
+      <div className="mt-2 flex items-center gap-2">
+        <h1 className="font-display text-xl font-semibold text-(--color-ink)">Roulette</h1>
+        <HelpButton onClick={() => setShowHelp(true)} />
+      </div>
+
+      {showHelp && (
+        <HelpModal title="How to play Roulette" onClose={() => setShowHelp(false)}>
+          <p>
+            Every round runs on a shared {ROULETTE_BETTING_MS / 1000}s betting timer. Bet on a single number or an
+            outside bet (Red/Black, Odd/Even, 1–18/19–36) before it closes, then the wheel spins.
+          </p>
+          <p>
+            <strong>Straight-up number:</strong> pays 36x your stake (35:1 plus your stake back) if it hits.
+          </p>
+          <p>
+            <strong>Outside bets</strong> (color, odd/even, high/low): pay 2x your stake (even money) if it hits.
+          </p>
+          <p>
+            <strong>⚡ Lucky numbers:</strong> each round, 3 random numbers get a random multiplier (50x, 100x, 200x,
+            or 500x, bigger ones rarer). If a straight-up bet on a lucky number hits, it pays that multiplier instead
+            of the usual 36x — outside bets are never affected by lucky numbers.
+          </p>
+          <p className="text-(--color-ink-soft)">Minimum bet {ROULETTE_MIN_BET} tokens.</p>
+        </HelpModal>
+      )}
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
         {round.status === "betting" && (

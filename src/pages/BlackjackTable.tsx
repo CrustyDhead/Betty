@@ -16,6 +16,7 @@ import {
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { TogglePill } from "../components/TogglePill";
 import { Avatar } from "../components/Avatar";
+import { HelpButton, HelpModal } from "../components/HelpModal";
 import { BLACKJACK_MIN_BET, BLACKJACK_TABLE_SEATS, BLACKJACK_TABLE_TURN_MS, formatCard, handValue } from "../lib/blackjack";
 import type { BlackjackTableSeat, PlayingCard } from "../types";
 
@@ -55,6 +56,7 @@ export function BlackjackTable() {
   const [chip, setChip] = useState<(typeof CHIP_VALUES)[number]>(10);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [resolvedAt, setResolvedAt] = useState<{ tableId: string; at: number } | null>(null);
 
@@ -217,11 +219,38 @@ export function BlackjackTable() {
         ← Casino
       </Link>
       <div className="mt-2 flex items-center justify-between">
-        <h1 className="font-display text-xl font-semibold text-(--color-ink)">Blackjack Table</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="font-display text-xl font-semibold text-(--color-ink)">Blackjack Table</h1>
+          <HelpButton onClick={() => setShowHelp(true)} />
+        </div>
         <Link to="/casino/blackjack" className="text-xs font-medium text-(--color-ink-soft) hover:text-(--color-ink)">
           Play solo →
         </Link>
       </div>
+
+      {showHelp && (
+        <HelpModal title="How to play Blackjack Table" onClose={() => setShowHelp(false)}>
+          <p>
+            A shared table — up to {BLACKJACK_TABLE_SEATS} people sit down and play against the same dealer. Sit at
+            an empty seat any time the table's open for betting.
+          </p>
+          <p>
+            Each round: a {" "}
+            <strong>betting window</strong> opens for everyone seated to place a bet, then cards are dealt. Seated
+            players who didn't bet just sit out that round.
+          </p>
+          <p>
+            Players act <strong>in seat order</strong> — hit or stand on your turn, with {BLACKJACK_TABLE_TURN_MS / 1000}s
+            to decide before you're auto-stood. Once everyone's done, the dealer plays (stands on all 17s) and
+            everyone still in gets paid out. Same rules as solo Blackjack: blackjack pays 3:2, a normal win pays 2x,
+            bust loses immediately.
+          </p>
+          <p className="text-(--color-ink-soft)">
+            Leaving is only allowed between rounds — you can't walk away mid-hand. Navigating away from this page
+            auto-leaves your seat for you. The table sits idle whenever no one's seated.
+          </p>
+        </HelpModal>
+      )}
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
         <p className="text-center text-xs font-medium uppercase tracking-wide text-(--color-ink-soft)">

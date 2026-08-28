@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { initStore } from "./lib/store";
+import { startVersionCheck } from "./lib/versionCheck";
 import { useCurrentUser, useStoreState } from "./lib/useStore";
 import { NavBar } from "./components/NavBar";
 import { Login } from "./pages/Login";
@@ -23,6 +24,7 @@ export default function App() {
 
   useEffect(() => {
     initStore();
+    startVersionCheck();
   }, []);
 
   if (state.error) {

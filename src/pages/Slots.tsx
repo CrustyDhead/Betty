@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { spinSlots } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { TogglePill } from "../components/TogglePill";
+import { HelpButton, HelpModal } from "../components/HelpModal";
 import { SLOTS_MIN_BET, SLOTS_REELS, SLOTS_SYMBOLS } from "../lib/slots";
 
 const CHIP_VALUES = [10, 50, 100, 500] as const;
@@ -16,6 +17,7 @@ export function Slots() {
   const [spinning, setSpinning] = useState(false);
   const [lastPayout, setLastPayout] = useState<{ amount: number; payout: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   if (!user) return null;
 
@@ -42,7 +44,28 @@ export function Slots() {
       <Link to="/casino" className="text-sm font-medium text-(--color-ink-soft) hover:text-(--color-ink)">
         ← Casino
       </Link>
-      <h1 className="mt-2 font-display text-xl font-semibold text-(--color-ink)">Slots</h1>
+      <div className="mt-2 flex items-center gap-2">
+        <h1 className="font-display text-xl font-semibold text-(--color-ink)">Slots</h1>
+        <HelpButton onClick={() => setShowHelp(true)} />
+      </div>
+
+      {showHelp && (
+        <HelpModal title="How to play Slots" onClose={() => setShowHelp(false)}>
+          <p>
+            Pick a bet size and spin {SLOTS_REELS} reels. You need at least <strong>3 of the same symbol</strong>{" "}
+            among the {SLOTS_REELS} reels to win anything — position doesn't matter, just how many reels show that
+            symbol.
+          </p>
+          <p>
+            Each symbol has its own payout for 3, 4, or 5 matches, shown in the Payouts table below — rarer symbols
+            (fewer of them on the reels) pay much more. Your winnings are your bet × that multiplier.
+          </p>
+          <p className="text-(--color-ink-soft)">
+            Example: bet 10, land 4× 💎 → 4-match pays 48x → you get back 480 tokens. Minimum bet {SLOTS_MIN_BET}{" "}
+            tokens.
+          </p>
+        </HelpModal>
+      )}
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 text-center shadow-sm shadow-black/5">
         <div className="flex justify-center gap-1.5 sm:gap-3">

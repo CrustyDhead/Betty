@@ -4,6 +4,7 @@ import { hitBlackjackHand, standBlackjackHand, startBlackjackHand } from "../lib
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { TogglePill } from "../components/TogglePill";
 import { Avatar } from "../components/Avatar";
+import { HelpButton, HelpModal } from "../components/HelpModal";
 import { BLACKJACK_MIN_BET, formatCard, handValue } from "../lib/blackjack";
 import type { BlackjackHand, PlayingCard } from "../types";
 
@@ -50,6 +51,7 @@ export function Blackjack() {
   const [dealing, setDealing] = useState(false);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   if (!user) return null;
 
@@ -122,7 +124,10 @@ export function Blackjack() {
         ← Casino
       </Link>
       <div className="mt-2 flex items-center justify-between">
-        <h1 className="font-display text-xl font-semibold text-(--color-ink)">Blackjack</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="font-display text-xl font-semibold text-(--color-ink)">Blackjack</h1>
+          <HelpButton onClick={() => setShowHelp(true)} />
+        </div>
         <Link
           to="/casino/blackjack/table"
           className="text-xs font-medium text-(--color-ink-soft) hover:text-(--color-ink)"
@@ -130,6 +135,28 @@ export function Blackjack() {
           Play with others →
         </Link>
       </div>
+
+      {showHelp && (
+        <HelpModal title="How to play Blackjack" onClose={() => setShowHelp(false)}>
+          <p>
+            Bet, get dealt 2 cards, and try to beat the dealer's hand without going over 21. Number cards count face
+            value, J/Q/K count 10, Aces count 11 or 1 (whichever keeps you under 21).
+          </p>
+          <p>
+            <strong>Hit</strong> to take another card, <strong>Stand</strong> to stop and let the dealer play. The
+            dealer draws until reaching 17 or more, then stops (stands on all 17s, including soft 17).
+          </p>
+          <p>
+            <strong>Blackjack</strong> (an Ace + a 10-value card on your first 2 cards) pays 3:2 — bet 10, get back
+            25. A normal win pays 2x (even money). Going over 21 (bust) loses immediately, even if the dealer busts
+            too. A tie is a push — you get your stake back.
+          </p>
+          <p className="text-(--color-ink-soft)">
+            Infinite shoe — every card drawn has the same odds every time, no card counting. Minimum bet{" "}
+            {BLACKJACK_MIN_BET} tokens.
+          </p>
+        </HelpModal>
+      )}
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
         {hand ? (
