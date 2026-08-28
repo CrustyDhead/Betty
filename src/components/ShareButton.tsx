@@ -32,6 +32,7 @@ export function ShareButton({ url, title }: { url: string; title: string }) {
         />
         <button
           type="button"
+          aria-label="Dismiss"
           onClick={() => setStatus("idle")}
           className="text-xs font-medium text-(--color-ink-soft) hover:text-(--color-ink)"
         >

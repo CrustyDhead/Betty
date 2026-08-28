@@ -9,6 +9,7 @@ import {
   rouletteBetsForRound,
 } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
+import { TogglePill } from "../components/TogglePill";
 import {
   ROULETTE_BETTING_MS,
   ROULETTE_CHIP_VALUES,
@@ -158,7 +159,7 @@ export function Roulette() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
-      <h1 className="font-display text-xl font-semibold text-(--color-ink)">🎰 Roulette</h1>
+      <h1 className="font-display text-xl font-semibold text-(--color-ink)">Roulette</h1>
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-4 text-center shadow-sm shadow-black/5">
         {round.status === "betting" && (
@@ -175,13 +176,11 @@ export function Roulette() {
         )}
         {round.status === "resolved" && (
           <p className="font-display text-sm font-semibold text-(--color-ink)">
-            {myStake > 0
-              ? myPayout > myStake
+            {myStake === 0
+              ? "Round over"
+              : myPayout > myStake
                 ? `You won ${Math.round(myPayout - myStake)} tokens! 🎉`
-                : myStake > 0
-                  ? "No luck this round."
-                  : ""
-              : "Round over"}
+                : "No luck this round."}
           </p>
         )}
 
@@ -211,9 +210,13 @@ export function Roulette() {
         )}
       </div>
 
-      {error && <p className="mt-3 text-center text-sm text-(--color-no-text)">{error}</p>}
+      {error && (
+        <p className="mt-3 rounded-xl bg-(--color-no-soft) px-4 py-3 text-center text-sm text-(--color-no-text)">
+          {error}
+        </p>
+      )}
 
-      <div className="mt-4 grid grid-cols-6 gap-1.5 sm:grid-cols-9">
+      <div className="mt-4 grid grid-cols-6 gap-2 sm:grid-cols-9">
         {NUMBER_GRID.map((n) => {
           const key = betKey("number", String(n));
           const mine = myTotals.get(key);
@@ -221,15 +224,16 @@ export function Roulette() {
             <button
               key={n}
               type="button"
+              aria-label={`Bet on number ${n}${mine !== undefined ? `, ${mine} tokens staked` : ""}`}
               disabled={round.status !== "betting" || placing}
               onClick={() => handleBet("number", String(n))}
-              className={`relative flex h-10 items-center justify-center rounded-lg font-mono text-sm font-semibold transition disabled:opacity-60 ${colorClasses(
+              className={`relative flex h-11 items-center justify-center rounded-lg font-mono text-sm font-semibold transition disabled:opacity-60 ${colorClasses(
                 numberColor(n),
               )}`}
             >
               {n}
               {mine !== undefined && (
-                <span className="absolute -top-1.5 -right-1.5 rounded-full bg-white px-1 text-[10px] font-bold text-(--color-ink) shadow">
+                <span className="absolute -top-2 -right-2 rounded-full bg-white px-1 text-[10px] font-bold text-(--color-ink) shadow">
                   {mine}
                 </span>
               )}
@@ -248,6 +252,7 @@ export function Roulette() {
             <button
               key={b.type}
               type="button"
+              aria-label={`Bet on ${b.label}${mine !== undefined ? `, ${mine} tokens staked` : ""}`}
               disabled={round.status !== "betting" || placing}
               onClick={() => handleBet(b.type, null)}
               className={`relative rounded-lg py-2.5 text-sm font-medium shadow-sm shadow-black/5 transition hover:-translate-y-0.5 hover:shadow-md disabled:opacity-60 disabled:hover:translate-y-0 ${
@@ -284,16 +289,15 @@ export function Roulette() {
         <span className="text-xs font-medium text-(--color-ink-soft)">Chip</span>
         <div className="flex gap-1.5">
           {ROULETTE_CHIP_VALUES.map((v) => (
-            <button
+            <TogglePill
               key={v}
-              type="button"
+              variant="inset"
+              active={chip === v}
+              ariaLabel={`Chip value ${v} tokens`}
               onClick={() => setChip(v)}
-              className={`rounded-full px-3 py-1.5 font-mono text-sm font-semibold transition ${
-                chip === v ? "bg-(--color-ink) text-white" : "bg-(--color-bg) text-(--color-ink-soft)"
-              }`}
             >
-              x{v}
-            </button>
+              <span className="font-mono">x{v}</span>
+            </TogglePill>
           ))}
         </div>
         <span className="font-mono text-sm font-semibold text-(--color-ink)">

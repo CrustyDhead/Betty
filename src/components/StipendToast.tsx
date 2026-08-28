@@ -1,8 +1,8 @@
 import { useEffect } from "react";
-import { clearStipendAlert } from "../lib/store";
+import { clearStipendAlert, type StipendAlert } from "../lib/store";
 import { useStoreState } from "../lib/useStore";
 
-const COPY = {
+const COPY: Record<StipendAlert["kind"], { emoji: string; label: string }> = {
   flat: { emoji: "💰", label: "Weekly stipend" },
   quiet: { emoji: "💤", label: "Quiet-week stipend" },
   steady: { emoji: "💰", label: "Weekly stipend" },

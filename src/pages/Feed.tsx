@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { effectiveStatus } from "../lib/store";
 import { BetCard } from "../components/BetCard";
+import { TogglePill } from "../components/TogglePill";
 import { CATEGORIES, CATEGORY_EMOJI } from "../lib/categories";
 import type { BetCategory } from "../types";
 
@@ -28,28 +29,13 @@ export function Feed() {
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          onClick={() => setFilter("All")}
-          className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-            filter === "All"
-              ? "bg-(--color-ink) text-white"
-              : "bg-(--color-surface) text-(--color-ink-soft) hover:text-(--color-ink)"
-          }`}
-        >
+        <TogglePill active={filter === "All"} onClick={() => setFilter("All")}>
           All
-        </button>
+        </TogglePill>
         {CATEGORIES.map((c) => (
-          <button
-            key={c}
-            onClick={() => setFilter(c)}
-            className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-              filter === c
-                ? "bg-(--color-ink) text-white"
-                : "bg-(--color-surface) text-(--color-ink-soft) hover:text-(--color-ink)"
-            }`}
-          >
+          <TogglePill key={c} active={filter === c} onClick={() => setFilter(c)}>
             {CATEGORY_EMOJI[c]} {c}
-          </button>
+          </TogglePill>
         ))}
       </div>
 

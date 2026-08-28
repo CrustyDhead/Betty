@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { createBet, joinNames } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
+import { TogglePill } from "../components/TogglePill";
 import { CATEGORIES, CATEGORY_EMOJI } from "../lib/categories";
 import type { BetCategory } from "../types";
 
@@ -129,18 +130,14 @@ export function CreateBet() {
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {QUICK_TEMPLATES.map((tpl) => (
-            <button
+            <TogglePill
               key={tpl.category}
-              type="button"
+              variant="inset"
+              active={activeTemplate?.category === tpl.category}
               onClick={() => applyTemplate(tpl)}
-              className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                activeTemplate?.category === tpl.category
-                  ? "bg-(--color-ink) text-white"
-                  : "bg-(--color-bg) text-(--color-ink-soft) hover:text-(--color-ink)"
-              }`}
             >
               {tpl.emoji} {tpl.label}
-            </button>
+            </TogglePill>
           ))}
         </div>
       </div>
@@ -177,18 +174,9 @@ export function CreateBet() {
           <p className="text-sm font-medium text-(--color-ink)">Category</p>
           <div className="mt-1.5 flex flex-wrap gap-2">
             {CATEGORIES.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setCategory(c)}
-                className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                  category === c
-                    ? "bg-(--color-ink) text-white"
-                    : "bg-(--color-bg) text-(--color-ink-soft) hover:text-(--color-ink)"
-                }`}
-              >
+              <TogglePill key={c} variant="inset" active={category === c} onClick={() => setCategory(c)}>
                 {CATEGORY_EMOJI[c]} {c}
-              </button>
+              </TogglePill>
             ))}
           </div>
         </div>
@@ -199,18 +187,14 @@ export function CreateBet() {
           </p>
           <div className="mt-1.5 flex flex-wrap gap-2">
             {state.users.map((u) => (
-              <button
+              <TogglePill
                 key={u.id}
-                type="button"
+                variant="inset"
+                active={subjectUserIds.includes(u.id)}
                 onClick={() => toggleSubject(u.id)}
-                className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                  subjectUserIds.includes(u.id)
-                    ? "bg-(--color-ink) text-white"
-                    : "bg-(--color-bg) text-(--color-ink-soft) hover:text-(--color-ink)"
-                }`}
               >
                 {u.name}
-              </button>
+              </TogglePill>
             ))}
           </div>
           <p className="mt-2 text-xs font-normal text-(--color-ink-soft)">

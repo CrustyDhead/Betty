@@ -20,6 +20,8 @@ export function Avatar({
       className={`flex ${dims} ${textSize} shrink-0 items-center justify-center rounded-full font-display font-semibold text-white`}
       style={{ backgroundColor: color || DEFAULT_AVATAR_COLOR }}
       title={name}
+      role="img"
+      aria-label={`${name}'s avatar`}
     >
       {emoji || initial}
     </div>
