@@ -15,6 +15,7 @@ import { Roulette } from "./pages/Roulette";
 import { Slots } from "./pages/Slots";
 import { Blackjack } from "./pages/Blackjack";
 import { BlackjackTable } from "./pages/BlackjackTable";
+import { Admin } from "./pages/Admin";
 
 export default function App() {
   const state = useStoreState();
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="/casino/blackjack/table" element={<BlackjackTable />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/profile/:userId" element={<Profile />} />
+        <Route path="/admin" element={<Admin />} />
       </Routes>
     </BrowserRouter>
   );

@@ -14,6 +14,7 @@ import type {
   RouletteBetType,
   RouletteRound,
   Side,
+  SignupCodeRequest,
   SlotsSpin,
   Transaction,
   User,
@@ -81,6 +82,7 @@ interface State {
   blackjackHands: BlackjackHand[];
   blackjackTable: BlackjackTable | null;
   blackjackTableSeats: BlackjackTableSeat[];
+  signupCodes: SignupCodeRequest[];
   loading: boolean;
   error: string | null;
 }
@@ -98,6 +100,7 @@ let state: State = {
   blackjackHands: [],
   blackjackTable: null,
   blackjackTableSeats: [],
+  signupCodes: [],
   loading: true,
   error: null,
 };
@@ -154,6 +157,18 @@ function mapUser(row: Row): User {
     avatarColor: row.avatar_color ?? null,
     lastCheckinAt: row.last_checkin_at ?? null,
     checkinStreak: row.checkin_streak ?? 0,
+    isAdmin: row.is_admin ?? false,
+  };
+}
+function mapSignupCodeRequest(row: Row): SignupCodeRequest {
+  return {
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    status: row.status,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    usedAt: row.used_at ?? null,
   };
 }
 function mapBet(row: Row): Bet {
@@ -336,6 +351,21 @@ async function fetchAll() {
   await fetchSlotsSpins();
   await fetchBlackjackHands();
   await pollBlackjackTable();
+  await fetchSignupCodes();
+}
+
+// Admin-only in the UI (see AdminPanel), but fetched for everyone like the
+// rest of this app's state — matches the existing permissive-select trust
+// model (see 0023_secure_registration.sql).
+async function fetchSignupCodes() {
+  const client = requireClient();
+  const { data, error } = await client
+    .from("signup_codes")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) return;
+  setState({ signupCodes: (data ?? []).map(mapSignupCodeRequest) });
 }
 
 async function fetchSlotsSpins() {
@@ -398,10 +428,30 @@ function notifyOnResolutions(prevBets: Bet[], newBets: Bet[], wagers: Wager[]) {
   }
 }
 
+// Same idea as notifyOnResolutions, but for the admin: fires when a brand
+// new pending signup code shows up, so relaying it doesn't require staring
+// at the admin panel waiting.
+function notifyOnNewSignupCodes(prevCodes: SignupCodeRequest[], newCodes: SignupCodeRequest[]) {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const me = getCurrentUser();
+  if (!me?.isAdmin) return;
+
+  for (const code of newCodes) {
+    if (code.status !== "pending") continue;
+    if (prevCodes.some((c) => c.id === code.id)) continue;
+    new Notification("New signup request", {
+      body: `${code.name} needs an access code — check the admin panel.`,
+      icon: "/favicon.svg",
+    });
+  }
+}
+
 async function pollAndNotify() {
   const prevBets = state.bets;
+  const prevCodes = state.signupCodes;
   await fetchAll();
   notifyOnResolutions(prevBets, state.bets, state.wagers);
+  notifyOnNewSignupCodes(prevCodes, state.signupCodes);
 }
 
 // The global 15s poll is too slow for a 20s betting round to feel alive —
@@ -538,7 +588,14 @@ function applyChange<
   setState({ [key]: upsertById(state[key] as { id: string }[], item) } as Partial<State>);
 }
 
-// ---- Auth (name + shared team PIN, open self-signup) ----
+// ---- Auth ----
+// Existing users: name + the shared team PIN, verified server-side
+// (verify_existing_login). New names: request a one-time code
+// (request_signup_code) that an admin relays out of band, then redeem it
+// (redeem_signup_code) to create the account. See 0023_secure_registration.sql
+// for why this replaced the old "open self-signup, PIN checked in the
+// browser" model — the PIN was shipped in cleartext in the JS bundle and
+// never actually enforced server-side.
 
 export function getCurrentUserId(): string | null {
   if (typeof localStorage === "undefined") return null;
@@ -550,35 +607,46 @@ export function getCurrentUser(): User | null {
   return state.users.find((u) => u.id === id) ?? null;
 }
 
-export async function login(name: string): Promise<User> {
-  const client = requireClient();
-  const trimmed = name.trim();
-
-  const { data: existing, error: findErr } = await client
-    .from("users")
-    .select("*")
-    .ilike("name", trimmed)
-    .maybeSingle();
-  if (findErr) throw new Error(findErr.message);
-
-  let user: User;
-  if (existing) {
-    user = mapUser(existing);
-  } else {
-    const { data: created, error: insertErr } = await client
-      .from("users")
-      .insert({ name: trimmed, token_balance: STARTING_BALANCE })
-      .select()
-      .single();
-    if (insertErr) throw new Error(insertErr.message);
-    user = mapUser(created);
-  }
-
+function setCurrentUser(user: User): void {
   setState({ users: upsertById(state.users, user) });
   localStorage.setItem(CURRENT_USER_KEY, user.id);
   listeners.forEach((l) => l());
+}
 
+// Throws "Wrong team PIN" on a bad PIN; returns null (not thrown) when no
+// account exists with that name, so the Login page can offer the signup
+// flow instead of showing a scary error.
+export async function loginExisting(name: string, pin: string): Promise<User | null> {
+  const client = requireClient();
+  const { data, error } = await client.rpc("verify_existing_login", { p_name: name, p_pin: pin });
+  if (error) throw new Error(error.message);
+  const row = data?.[0];
+  if (!row) return null;
+
+  const user = mapUser(row);
+  setCurrentUser(user);
   await collectLoanIfDue(user.id);
+  return user;
+}
+
+// Generates a one-time code for a not-yet-registered name — never returned
+// here, only ever visible via the admin panel. The caller relays it to an
+// admin out of band, who tells the newcomer.
+export async function requestSignupCode(name: string): Promise<void> {
+  const client = requireClient();
+  const { error } = await client.rpc("request_signup_code", { p_name: name });
+  if (error) throw new Error(error.message);
+}
+
+export async function redeemSignupCode(name: string, code: string): Promise<User> {
+  const client = requireClient();
+  const { data, error } = await client.rpc("redeem_signup_code", { p_name: name, p_code: code });
+  if (error) throw new Error(error.message);
+  const row = data?.[0];
+  if (!row) throw new Error("Something went wrong");
+
+  const user = mapUser(row);
+  setCurrentUser(user);
   return user;
 }
 

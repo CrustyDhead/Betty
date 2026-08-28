@@ -10,6 +10,19 @@ export interface User {
   avatarColor: string | null;
   lastCheckinAt: string | null;
   checkinStreak: number;
+  isAdmin: boolean;
+}
+
+export type SignupCodeStatus = "pending" | "used" | "expired";
+
+export interface SignupCodeRequest {
+  id: string;
+  name: string;
+  code: string;
+  status: SignupCodeStatus;
+  createdAt: string;
+  expiresAt: string;
+  usedAt: string | null;
 }
 
 export interface Bet {

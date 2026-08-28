@@ -27,7 +27,7 @@ Log in with any name (open self-signup) — new names start with 1,000 tokens.
 2. Run `supabase/schema.sql`, then every file in `supabase/migrations/` **in order** (0002 through the latest) in the SQL editor.
 3. Copy `.env.example` to `.env` and fill in `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` from Project Settings → API.
 
-Set `VITE_TEAM_PIN` in `.env` to require a shared PIN at login; leave it blank to skip that step.
+Existing users log in with name + the shared team PIN (checked server-side, hashed — see `supabase/migrations/0023_secure_registration.sql`). New names request a one-time access code instead; an admin (see `users.is_admin`) sees it in the in-app Admin panel and relays it out of band.
 
 `supabase/reset-for-launch.sql` is a one-time manual script (not a numbered migration) that wipes all data — use it to clear test accounts before a real launch, not as part of normal setup.
 

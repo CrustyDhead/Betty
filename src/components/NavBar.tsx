@@ -12,12 +12,13 @@ const LINKS = [
 
 export function NavBar() {
   const user = useCurrentUser();
+  const links = user?.isAdmin ? [...LINKS, { to: "/admin", label: "Admin", icon: "🔑" }] : LINKS;
 
   return (
     <header className="sticky top-0 z-10 border-b border-black/5 bg-(--color-bg)/90 backdrop-blur">
       <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
         <nav className="flex items-center gap-0.5 sm:gap-1">
-          {LINKS.map((link) => (
+          {links.map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
