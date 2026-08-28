@@ -2,6 +2,11 @@ import type { PlayingCard, Suit } from "../types";
 
 export const BLACKJACK_MIN_BET = 10;
 
+// Shared table — one perpetual room, up to this many seats.
+export const BLACKJACK_TABLE_SEATS = 5;
+export const BLACKJACK_TABLE_BETTING_MS = 20_000;
+export const BLACKJACK_TABLE_TURN_MS = 15_000;
+
 const RANKS: PlayingCard["rank"][] = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
 const SUITS: Suit[] = ["♠", "♥", "♦", "♣"];
 

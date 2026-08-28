@@ -121,7 +121,15 @@ export function Blackjack() {
       <Link to="/casino" className="text-sm font-medium text-(--color-ink-soft) hover:text-(--color-ink)">
         ← Casino
       </Link>
-      <h1 className="mt-2 font-display text-xl font-semibold text-(--color-ink)">Blackjack</h1>
+      <div className="mt-2 flex items-center justify-between">
+        <h1 className="font-display text-xl font-semibold text-(--color-ink)">Blackjack</h1>
+        <Link
+          to="/casino/blackjack/table"
+          className="text-xs font-medium text-(--color-ink-soft) hover:text-(--color-ink)"
+        >
+          Play with others →
+        </Link>
+      </div>
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 shadow-sm shadow-black/5">
         {hand ? (

@@ -147,3 +147,30 @@ export interface BlackjackHand {
   createdAt: string;
   resolvedAt: string | null;
 }
+
+export type BlackjackTableStatus = "betting" | "player_turns" | "dealer_turn" | "resolved";
+export type BlackjackSeatStatus = "seated" | "playing" | "stood" | "bust" | "blackjack" | "resolved";
+
+export interface BlackjackTable {
+  id: string;
+  status: BlackjackTableStatus;
+  bettingClosesAt: string;
+  dealerCards: PlayingCard[] | null;
+  currentSeatIndex: number | null;
+  turnEndsAt: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface BlackjackTableSeat {
+  id: string;
+  tableId: string;
+  seatIndex: number;
+  userId: string;
+  status: BlackjackSeatStatus;
+  betAmount: number | null;
+  playerCards: PlayingCard[] | null;
+  outcome: BlackjackOutcome | null;
+  payout: number | null;
+  joinedAt: string;
+}

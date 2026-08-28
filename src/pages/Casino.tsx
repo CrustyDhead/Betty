@@ -19,6 +19,12 @@ const GAMES = [
     title: "Blackjack",
     description: "Classic hit or stand against the dealer. Blackjack pays 3:2.",
   },
+  {
+    to: "/casino/blackjack/table",
+    emoji: "🪑",
+    title: "Blackjack Table",
+    description: "Sit at a shared table — up to 5 players, one dealer, turns in order.",
+  },
 ];
 
 export function Casino() {

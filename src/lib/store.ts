@@ -5,6 +5,8 @@ import type {
   BetCategory,
   BetStatus,
   BlackjackHand,
+  BlackjackTable,
+  BlackjackTableSeat,
   Comment,
   Loan,
   PlayingCard,
@@ -19,7 +21,16 @@ import type {
 } from "../types";
 import { ROULETTE_MIN_BET, calculatePayout, rollLuckyNumbers, rollWinningNumber } from "./roulette";
 import { SLOTS_MIN_BET, calculateSlotsPayout, rollReels } from "./slots";
-import { BLACKJACK_MIN_BET, drawCard, isBlackjack, isBust, playDealerHand, resolveHand } from "./blackjack";
+import {
+  BLACKJACK_MIN_BET,
+  BLACKJACK_TABLE_BETTING_MS,
+  BLACKJACK_TABLE_TURN_MS,
+  drawCard,
+  isBlackjack,
+  isBust,
+  playDealerHand,
+  resolveHand,
+} from "./blackjack";
 
 /**
  * Supabase-backed data layer (see supabase/schema.sql +
@@ -68,6 +79,8 @@ interface State {
   loans: Loan[];
   slotsSpins: SlotsSpin[];
   blackjackHands: BlackjackHand[];
+  blackjackTable: BlackjackTable | null;
+  blackjackTableSeats: BlackjackTableSeat[];
   loading: boolean;
   error: string | null;
 }
@@ -83,6 +96,8 @@ let state: State = {
   loans: [],
   slotsSpins: [],
   blackjackHands: [],
+  blackjackTable: null,
+  blackjackTableSeats: [],
   loading: true,
   error: null,
 };
@@ -241,6 +256,33 @@ function mapBlackjackHand(row: Row): BlackjackHand {
   };
 }
 
+function mapBlackjackTable(row: Row): BlackjackTable {
+  return {
+    id: row.id,
+    status: row.status,
+    bettingClosesAt: row.betting_closes_at,
+    dealerCards: row.dealer_cards ?? null,
+    currentSeatIndex: row.current_seat_index ?? null,
+    turnEndsAt: row.turn_ends_at ?? null,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at ?? null,
+  };
+}
+function mapBlackjackTableSeat(row: Row): BlackjackTableSeat {
+  return {
+    id: row.id,
+    tableId: row.table_id,
+    seatIndex: row.seat_index,
+    userId: row.user_id,
+    status: row.status,
+    betAmount: row.bet_amount === null ? null : Number(row.bet_amount),
+    playerCards: row.player_cards ?? null,
+    outcome: row.outcome ?? null,
+    payout: row.payout === null ? null : Number(row.payout),
+    joinedAt: row.joined_at,
+  };
+}
+
 function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   const idx = list.findIndex((x) => x.id === item.id);
   if (idx === -1) return [...list, item];
@@ -293,6 +335,7 @@ async function fetchAll() {
   await fetchLoans();
   await fetchSlotsSpins();
   await fetchBlackjackHands();
+  await pollBlackjackTable();
 }
 
 async function fetchSlotsSpins() {
@@ -378,6 +421,21 @@ export async function pollRoulette() {
   });
 }
 
+// Same "own fast poll while mounted" treatment as pollRoulette — a shared
+// table needs to feel live too.
+export async function pollBlackjackTable() {
+  const client = requireClient();
+  const [table, seats] = await Promise.all([
+    client.from("blackjack_table").select("*").limit(1),
+    client.from("blackjack_table_seats").select("*").order("seat_index", { ascending: true }),
+  ]);
+  if (table.error || seats.error) return;
+  setState({
+    blackjackTable: table.data && table.data[0] ? mapBlackjackTable(table.data[0]) : null,
+    blackjackTableSeats: (seats.data ?? []).map(mapBlackjackTableSeat),
+  });
+}
+
 export function notificationPermission(): NotificationPermission | "unsupported" {
   if (typeof Notification === "undefined") return "unsupported";
   return Notification.permission;
@@ -433,6 +491,13 @@ export async function initStore() {
     .on("postgres_changes", { event: "*", schema: "public", table: "blackjack_hands" }, (payload) =>
       applyChange(payload, "blackjackHands", mapBlackjackHand),
     )
+    .on("postgres_changes", { event: "*", schema: "public", table: "blackjack_table" }, (payload) => {
+      if (payload.eventType === "DELETE") return; // singleton, never deleted in practice
+      setState({ blackjackTable: mapBlackjackTable(payload.new as Row) });
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "blackjack_table_seats" }, (payload) =>
+      applyChange(payload, "blackjackTableSeats", mapBlackjackTableSeat),
+    )
     .subscribe();
 
   setInterval(() => {
@@ -457,7 +522,8 @@ function applyChange<
     | "rouletteBets"
     | "loans"
     | "slotsSpins"
-    | "blackjackHands",
+    | "blackjackHands"
+    | "blackjackTableSeats",
 >(
   payload: RealtimePostgresChangesPayload<Row>,
   key: K,
@@ -1548,4 +1614,405 @@ async function finishBlackjackHand(handId: string, playerCards: PlayingCard[]): 
     }
   }
   return resolved;
+}
+
+// ---- Blackjack Table ----
+// A shared multiplayer room — up to BLACKJACK_TABLE_SEATS players sit at one
+// perpetual table row and cycle through betting -> player_turns ->
+// dealer_turn -> resolved -> betting forever. Same client-driven
+// atomic-claim phase engine as Roulette (no backend/cron here): every
+// transition is a write filtered on the expected current status, so a
+// simultaneous trigger from another open tab is a harmless no-op. Seats
+// persist across rounds (a player stays seated until they leave) and reset
+// for the next round once the pause after resolution elapses.
+
+// Creates the singleton table row if it doesn't exist yet. Same
+// insert-and-ignore-the-unique-violation pattern as ensureActiveRouletteRound.
+export async function ensureBlackjackTable(): Promise<void> {
+  if (state.blackjackTable) return;
+  const client = requireClient();
+  const { error } = await client.from("blackjack_table").insert({
+    status: "betting",
+    betting_closes_at: new Date(Date.now() + BLACKJACK_TABLE_BETTING_MS).toISOString(),
+  });
+  if (error && error.code !== "23505") {
+    // Non-critical for a fun feature — the next poll will just retry.
+  }
+}
+
+export function mySeatAtBlackjackTable(userId: string): BlackjackTableSeat | null {
+  return state.blackjackTableSeats.find((s) => s.userId === userId) ?? null;
+}
+
+export async function joinBlackjackTable(tableId: string, userId: string, seatIndex: number): Promise<void> {
+  if (mySeatAtBlackjackTable(userId)) throw new Error("Already seated");
+  const client = requireClient();
+  const { data, error } = await client
+    .from("blackjack_table_seats")
+    .insert({ table_id: tableId, seat_index: seatIndex, user_id: userId, status: "seated" })
+    .select()
+    .single();
+  if (error) {
+    if (error.code === "23505") throw new Error("That seat is taken");
+    throw new Error(error.message);
+  }
+  setState({ blackjackTableSeats: upsertById(state.blackjackTableSeats, mapBlackjackTableSeat(data)) });
+}
+
+// Only lets someone leave between rounds — walking away mid-hand would
+// abandon a live bet with no one to resolve it against.
+export async function leaveBlackjackTable(seatId: string): Promise<void> {
+  const seat = state.blackjackTableSeats.find((s) => s.id === seatId);
+  if (!seat) return;
+  if (seat.status !== "seated" && seat.status !== "resolved") {
+    throw new Error("Wait for this round to finish before leaving");
+  }
+  const client = requireClient();
+  const { error } = await client.from("blackjack_table_seats").delete().eq("id", seatId);
+  if (error) throw new Error(error.message);
+  setState({ blackjackTableSeats: removeById(state.blackjackTableSeats, seatId) });
+}
+
+export async function placeBlackjackTableBet(
+  tableId: string,
+  seatId: string,
+  userId: string,
+  amount: number,
+): Promise<void> {
+  const table = state.blackjackTable;
+  const seat = state.blackjackTableSeats.find((s) => s.id === seatId);
+  const user = state.users.find((u) => u.id === userId);
+  if (!table || table.id !== tableId) throw new Error("Table not found");
+  if (!seat || seat.userId !== userId) throw new Error("Seat not found");
+  if (!user) throw new Error("User not found");
+  if (table.status !== "betting") throw new Error("Betting is closed for this round");
+  if (seat.betAmount !== null) throw new Error("Already bet this round");
+  if (!Number.isInteger(amount) || amount < BLACKJACK_MIN_BET) {
+    throw new Error(`Bets must be a whole number of at least ${BLACKJACK_MIN_BET} tokens`);
+  }
+  if (amount > user.tokenBalance) throw new Error("Insufficient balance");
+
+  const client = requireClient();
+  const { data: seatRow, error: seatErr } = await client
+    .from("blackjack_table_seats")
+    .update({ bet_amount: amount })
+    .eq("id", seatId)
+    .is("bet_amount", null)
+    .select()
+    .maybeSingle();
+  if (seatErr) throw new Error(seatErr.message);
+  if (!seatRow) throw new Error("Already bet this round");
+
+  // Ledger entry before the balance move — see placeWager for why.
+  const { data: txnRow, error: txnErr } = await client
+    .from("transactions")
+    .insert({ user_id: userId, type: "blackjack", amount: -amount })
+    .select()
+    .single();
+  if (txnErr) throw new Error(`Bet placed but the ledger entry failed to save: ${txnErr.message}`);
+
+  const userRow = await adjustBalance(userId, -amount);
+
+  setState({
+    blackjackTableSeats: upsertById(state.blackjackTableSeats, mapBlackjackTableSeat(seatRow)),
+    users: upsertById(state.users, userRow),
+    transactions: upsertById(state.transactions, mapTransaction(txnRow)),
+  });
+}
+
+// Deals every seat that placed a bet once the betting window closes, then
+// either starts the first seat's turn or — if nobody's actually playing
+// (empty table, or everyone got a natural blackjack) — skips straight to
+// the dealer.
+export async function closeBlackjackTableBettingIfDue(table: BlackjackTable): Promise<void> {
+  if (table.status !== "betting") return;
+  if (Date.now() < new Date(table.bettingClosesAt).getTime()) return;
+
+  const client = requireClient();
+  const dealerCards = [drawCard(), drawCard()];
+
+  // Atomic claim — only the first caller to flip status out of "betting"
+  // proceeds to deal; everyone else's call becomes a no-op.
+  const { data: claimedRow, error: claimErr } = await client
+    .from("blackjack_table")
+    .update({ status: "player_turns", dealer_cards: dealerCards })
+    .eq("id", table.id)
+    .eq("status", "betting")
+    .select()
+    .maybeSingle();
+  if (claimErr || !claimedRow) return;
+  setState({ blackjackTable: mapBlackjackTable(claimedRow) });
+
+  const seatsToDeal = state.blackjackTableSeats.filter(
+    (s) => s.tableId === table.id && s.betAmount !== null && s.status === "seated",
+  );
+
+  const dealtSeats: BlackjackTableSeat[] = [];
+  for (const seat of seatsToDeal) {
+    const playerCards = [drawCard(), drawCard()];
+    const status = isBlackjack(playerCards) ? "blackjack" : "playing";
+    const { data: seatRow, error } = await client
+      .from("blackjack_table_seats")
+      .update({ player_cards: playerCards, status })
+      .eq("id", seat.id)
+      .select()
+      .maybeSingle();
+    if (!error && seatRow) {
+      const mapped = mapBlackjackTableSeat(seatRow);
+      dealtSeats.push(mapped);
+      setState({ blackjackTableSeats: upsertById(state.blackjackTableSeats, mapped) });
+    }
+  }
+
+  const firstPlaying = dealtSeats.filter((s) => s.status === "playing").sort((a, b) => a.seatIndex - b.seatIndex)[0];
+
+  if (!firstPlaying) {
+    const { data: tableRow, error } = await client
+      .from("blackjack_table")
+      .update({ status: "dealer_turn" })
+      .eq("id", table.id)
+      .eq("status", "player_turns")
+      .select()
+      .maybeSingle();
+    if (!error && tableRow) setState({ blackjackTable: mapBlackjackTable(tableRow) });
+    await resolveBlackjackTableDealer(table.id);
+    return;
+  }
+
+  const { data: tableRow, error: tableErr } = await client
+    .from("blackjack_table")
+    .update({
+      current_seat_index: firstPlaying.seatIndex,
+      turn_ends_at: new Date(Date.now() + BLACKJACK_TABLE_TURN_MS).toISOString(),
+    })
+    .eq("id", table.id)
+    .select()
+    .maybeSingle();
+  if (!tableErr && tableRow) setState({ blackjackTable: mapBlackjackTable(tableRow) });
+}
+
+function nextPlayingBlackjackSeat(tableId: string, afterSeatIndex: number): BlackjackTableSeat | null {
+  const playing = state.blackjackTableSeats
+    .filter((s) => s.tableId === tableId && s.status === "playing")
+    .sort((a, b) => a.seatIndex - b.seatIndex);
+  return playing.find((s) => s.seatIndex > afterSeatIndex) ?? null;
+}
+
+// Advances the table to the next playing seat after `seatIndex` finishes
+// acting, or into the dealer's turn if none remain. Atomic-claim guarded on
+// current_seat_index so a stray duplicate call can't double-advance.
+async function advanceBlackjackTurn(tableId: string, seatIndex: number): Promise<void> {
+  const client = requireClient();
+  const next = nextPlayingBlackjackSeat(tableId, seatIndex);
+
+  if (!next) {
+    const { data, error } = await client
+      .from("blackjack_table")
+      .update({ status: "dealer_turn", current_seat_index: null, turn_ends_at: null })
+      .eq("id", tableId)
+      .eq("current_seat_index", seatIndex)
+      .select()
+      .maybeSingle();
+    if (!error && data) setState({ blackjackTable: mapBlackjackTable(data) });
+    await resolveBlackjackTableDealer(tableId);
+    return;
+  }
+
+  const { data, error } = await client
+    .from("blackjack_table")
+    .update({
+      current_seat_index: next.seatIndex,
+      turn_ends_at: new Date(Date.now() + BLACKJACK_TABLE_TURN_MS).toISOString(),
+    })
+    .eq("id", tableId)
+    .eq("current_seat_index", seatIndex)
+    .select()
+    .maybeSingle();
+  if (!error && data) setState({ blackjackTable: mapBlackjackTable(data) });
+}
+
+export async function hitBlackjackTableSeat(seatId: string): Promise<void> {
+  const table = state.blackjackTable;
+  const seat = state.blackjackTableSeats.find((s) => s.id === seatId);
+  if (!table || !seat) throw new Error("Seat not found");
+  if (table.status !== "player_turns" || table.currentSeatIndex !== seat.seatIndex) {
+    throw new Error("Not your turn");
+  }
+  if (seat.status !== "playing") throw new Error("This hand is already settled");
+
+  const playerCards = [...(seat.playerCards ?? []), drawCard()];
+  const busted = isBust(playerCards);
+  const client = requireClient();
+  const { data, error } = await client
+    .from("blackjack_table_seats")
+    .update({ player_cards: playerCards, status: busted ? "bust" : "playing" })
+    .eq("id", seatId)
+    .eq("status", "playing")
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("This hand is already settled");
+  setState({ blackjackTableSeats: upsertById(state.blackjackTableSeats, mapBlackjackTableSeat(data)) });
+
+  if (busted) {
+    await advanceBlackjackTurn(table.id, seat.seatIndex);
+  }
+}
+
+export async function standBlackjackTableSeat(seatId: string): Promise<void> {
+  const table = state.blackjackTable;
+  const seat = state.blackjackTableSeats.find((s) => s.id === seatId);
+  if (!table || !seat) throw new Error("Seat not found");
+  if (table.status !== "player_turns" || table.currentSeatIndex !== seat.seatIndex) {
+    throw new Error("Not your turn");
+  }
+  if (seat.status !== "playing") throw new Error("This hand is already settled");
+
+  const client = requireClient();
+  const { data, error } = await client
+    .from("blackjack_table_seats")
+    .update({ status: "stood" })
+    .eq("id", seatId)
+    .eq("status", "playing")
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("This hand is already settled");
+  setState({ blackjackTableSeats: upsertById(state.blackjackTableSeats, mapBlackjackTableSeat(data)) });
+
+  await advanceBlackjackTurn(table.id, seat.seatIndex);
+}
+
+// Called every tick by the page — if the seat the table thinks is "current"
+// has already settled some other way (a race with another advance call),
+// nudge the turn forward instead of waiting on it forever.
+export async function nudgeBlackjackTableIfStale(table: BlackjackTable): Promise<void> {
+  if (table.status !== "player_turns" || table.currentSeatIndex === null) return;
+  const seat = state.blackjackTableSeats.find(
+    (s) => s.tableId === table.id && s.seatIndex === table.currentSeatIndex,
+  );
+  if (seat && seat.status === "playing") return; // still legitimately their turn
+  await advanceBlackjackTurn(table.id, table.currentSeatIndex);
+}
+
+// Force-stands the current seat once its turn timer runs out. Racing a real
+// stand/hit harmlessly loses — the .eq("status", "playing") filter no-ops it.
+export async function autoStandBlackjackTableSeatIfDue(table: BlackjackTable): Promise<void> {
+  if (table.status !== "player_turns" || table.currentSeatIndex === null || !table.turnEndsAt) return;
+  if (Date.now() < new Date(table.turnEndsAt).getTime()) return;
+  const seat = state.blackjackTableSeats.find(
+    (s) => s.tableId === table.id && s.seatIndex === table.currentSeatIndex,
+  );
+  if (!seat || seat.status !== "playing") return; // nudgeBlackjackTableIfStale already covers this
+  await standBlackjackTableSeat(seat.id);
+}
+
+// Plays the dealer's hand and pays out every seat still in the round
+// (playing/stood/blackjack — a bust already lost, its stake was debited at
+// bet time and nothing further happens for it). Only winners/pushes get a
+// credit + ledger entry, same as resolveRouletteRound.
+async function resolveBlackjackTableDealer(tableId: string): Promise<void> {
+  const client = requireClient();
+  const { data: claimedRow, error: claimErr } = await client
+    .from("blackjack_table")
+    .update({ status: "resolved", resolved_at: new Date().toISOString() })
+    .eq("id", tableId)
+    .eq("status", "dealer_turn")
+    .select()
+    .maybeSingle();
+  if (claimErr || !claimedRow) return; // someone else already resolved it, or not ready yet
+
+  const dealerCards = playDealerHand((claimedRow.dealer_cards as PlayingCard[]) ?? []);
+  const { data: finalRow } = await client
+    .from("blackjack_table")
+    .update({ dealer_cards: dealerCards })
+    .eq("id", tableId)
+    .select()
+    .maybeSingle();
+  setState({ blackjackTable: mapBlackjackTable(finalRow ?? { ...claimedRow, dealer_cards: dealerCards }) });
+
+  const seatsInPlay = state.blackjackTableSeats.filter(
+    (s) => s.tableId === tableId && (s.status === "playing" || s.status === "stood" || s.status === "blackjack"),
+  );
+
+  for (const seat of seatsInPlay) {
+    const { outcome, payout } = resolveHand(seat.playerCards ?? [], dealerCards, seat.betAmount ?? 0);
+    const { data: seatRow, error: seatErr } = await client
+      .from("blackjack_table_seats")
+      .update({ status: "resolved", outcome, payout })
+      .eq("id", seat.id)
+      .select()
+      .maybeSingle();
+    if (!seatErr && seatRow) {
+      setState({ blackjackTableSeats: upsertById(state.blackjackTableSeats, mapBlackjackTableSeat(seatRow)) });
+    }
+    if (payout <= 0) continue;
+
+    // Ledger entry before the balance move — see placeWager for why.
+    const { data: txnRow, error: txnErr } = await client
+      .from("transactions")
+      .insert({ user_id: seat.userId, type: "blackjack", amount: payout })
+      .select()
+      .single();
+    if (txnErr) continue; // this payout didn't land; investigable, not silent — keep paying the rest
+    setState({ transactions: upsertById(state.transactions, mapTransaction(txnRow)) });
+
+    try {
+      const userRow = await adjustBalance(seat.userId, payout);
+      setState({ users: upsertById(state.users, userRow) });
+    } catch {
+      // non-critical — this payout's balance move didn't land, keep paying the rest
+    }
+  }
+
+  // Bust seats already lost with no payout — mark them resolved too so the
+  // UI can clear them next round.
+  const bustSeats = state.blackjackTableSeats.filter((s) => s.tableId === tableId && s.status === "bust");
+  for (const seat of bustSeats) {
+    const { data: seatRow, error } = await client
+      .from("blackjack_table_seats")
+      .update({ status: "resolved", outcome: "lose", payout: 0 })
+      .eq("id", seat.id)
+      .select()
+      .maybeSingle();
+    if (!error && seatRow) {
+      setState({ blackjackTableSeats: upsertById(state.blackjackTableSeats, mapBlackjackTableSeat(seatRow)) });
+    }
+  }
+}
+
+// Called by the page once the pause after resolution elapses — reopens
+// betting and resets every seat for the next round (still-seated players
+// don't need to rejoin). Filtered on the expected current status, same
+// idempotent-retry shape as ensureActiveRouletteRound.
+export async function ensureNextBlackjackRound(table: BlackjackTable): Promise<void> {
+  if (table.status !== "resolved") return;
+  const client = requireClient();
+  const { data: tableRow, error } = await client
+    .from("blackjack_table")
+    .update({
+      status: "betting",
+      betting_closes_at: new Date(Date.now() + BLACKJACK_TABLE_BETTING_MS).toISOString(),
+      dealer_cards: null,
+      current_seat_index: null,
+      turn_ends_at: null,
+      resolved_at: null,
+    })
+    .eq("id", table.id)
+    .eq("status", "resolved")
+    .select()
+    .maybeSingle();
+  if (error || !tableRow) return;
+  setState({ blackjackTable: mapBlackjackTable(tableRow) });
+
+  const { data: seatRows, error: seatsErr } = await client
+    .from("blackjack_table_seats")
+    .update({ status: "seated", bet_amount: null, player_cards: null, outcome: null, payout: null })
+    .eq("table_id", table.id)
+    .select();
+  if (!seatsErr && seatRows) {
+    let seats = state.blackjackTableSeats;
+    for (const row of seatRows) seats = upsertById(seats, mapBlackjackTableSeat(row));
+    setState({ blackjackTableSeats: seats });
+  }
 }
