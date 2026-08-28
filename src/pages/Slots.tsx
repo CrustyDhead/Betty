@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { spinSlots } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
 import { TogglePill } from "../components/TogglePill";
-import { SLOTS_MIN_BET, SLOTS_SYMBOLS } from "../lib/slots";
+import { SLOTS_MIN_BET, SLOTS_REELS, SLOTS_SYMBOLS } from "../lib/slots";
 
 const CHIP_VALUES = [10, 50, 100, 500] as const;
 
@@ -45,11 +45,11 @@ export function Slots() {
       <h1 className="mt-2 font-display text-xl font-semibold text-(--color-ink)">Slots</h1>
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 text-center shadow-sm shadow-black/5">
-        <div className="flex justify-center gap-3">
-          {(reels ?? ["❔", "❔", "❔"]).map((symbol, i) => (
+        <div className="flex justify-center gap-1.5 sm:gap-3">
+          {(reels ?? Array.from({ length: SLOTS_REELS }, () => "❔")).map((symbol, i) => (
             <div
               key={i}
-              className="flex h-20 w-20 items-center justify-center rounded-2xl bg-(--color-bg) text-4xl shadow-inner"
+              className="flex h-14 w-14 items-center justify-center rounded-2xl bg-(--color-bg) text-2xl shadow-inner sm:h-20 sm:w-20 sm:text-4xl"
             >
               {symbol}
             </div>
@@ -106,18 +106,20 @@ export function Slots() {
               key={s.emoji}
               className="flex items-center justify-between rounded-lg bg-(--color-surface) px-3 py-1.5 text-xs shadow-sm shadow-black/5"
             >
-              <span>
-                {s.emoji} {s.emoji} {s.emoji}
+              <span>{s.emoji}</span>
+              <span className="flex gap-3 font-mono text-(--color-ink-soft)">
+                {s.payouts.map((p) => (
+                  <span key={p.matches}>
+                    {p.matches}× {p.multiplier}x
+                  </span>
+                ))}
               </span>
-              <span className="font-mono text-(--color-ink-soft)">{s.payout}x</span>
             </div>
           ))}
-          <div className="flex items-center justify-between rounded-lg bg-(--color-surface) px-3 py-1.5 text-xs shadow-sm shadow-black/5">
-            <span>Any 2 matching</span>
-            <span className="font-mono text-(--color-ink-soft)">1.5x</span>
-          </div>
         </div>
-        <p className="mt-2 text-xs text-(--color-ink-soft)">Minimum bet {SLOTS_MIN_BET} tokens.</p>
+        <p className="mt-2 text-xs text-(--color-ink-soft)">
+          Need 3+ of the same symbol among the {SLOTS_REELS} reels to win. Minimum bet {SLOTS_MIN_BET} tokens.
+        </p>
       </div>
 
       {mySpins.length > 0 && (

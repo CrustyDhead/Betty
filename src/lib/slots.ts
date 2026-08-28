@@ -1,27 +1,35 @@
 export const SLOTS_MIN_BET = 10;
+export const SLOTS_REELS = 5;
+
+export interface SlotsPayoutTier {
+  matches: number; // how many of the 5 reels need to show this symbol
+  multiplier: number;
+}
 
 export interface SlotsSymbol {
   emoji: string;
   weight: number;
-  payout: number; // multiplier for 3-of-a-kind
+  payouts: SlotsPayoutTier[]; // 3, 4, 5-of-a-kind, rarest symbol last
 }
 
-// Weighted so the jackpot symbol stays rare.
+// 8 symbols across 5 reels, weighted so the rarest (🎰) is genuinely rare.
+// A win requires at least 3 of the 5 reels to match — no payout for just a
+// pair anymore (that "any 2 matching" freebie, combined with only 3 reels,
+// used to fire on ~63% of spins and push RTP to ~121%; see slots RTP audit
+// in chat). With 5 reels and an 8-symbol table, a 3+ match happens on
+// ~30% of spins and this payout table lands at ~88.5% RTP overall —
+// meaningfully harder, still a normal generous-house-edge game rather than
+// a guaranteed money printer.
 export const SLOTS_SYMBOLS: SlotsSymbol[] = [
-  { emoji: "🍒", weight: 40, payout: 3 },
-  { emoji: "🍋", weight: 25, payout: 5 },
-  { emoji: "🔔", weight: 15, payout: 10 },
-  { emoji: "💎", weight: 12, payout: 25 },
-  { emoji: "7️⃣", weight: 8, payout: 100 },
+  { emoji: "🍒", weight: 30, payouts: [{ matches: 3, multiplier: 1 }, { matches: 4, multiplier: 4 }, { matches: 5, multiplier: 30 }] },
+  { emoji: "🍋", weight: 22, payouts: [{ matches: 3, multiplier: 2 }, { matches: 4, multiplier: 7 }, { matches: 5, multiplier: 48 }] },
+  { emoji: "🍊", weight: 18, payouts: [{ matches: 3, multiplier: 3 }, { matches: 4, multiplier: 11 }, { matches: 5, multiplier: 70 }] },
+  { emoji: "🔔", weight: 12, payouts: [{ matches: 3, multiplier: 5 }, { matches: 4, multiplier: 18 }, { matches: 5, multiplier: 120 }] },
+  { emoji: "⭐", weight: 8, payouts: [{ matches: 3, multiplier: 9 }, { matches: 4, multiplier: 30 }, { matches: 5, multiplier: 220 }] },
+  { emoji: "💎", weight: 6, payouts: [{ matches: 3, multiplier: 14 }, { matches: 4, multiplier: 48 }, { matches: 5, multiplier: 360 }] },
+  { emoji: "7️⃣", weight: 3, payouts: [{ matches: 3, multiplier: 28 }, { matches: 4, multiplier: 120 }, { matches: 5, multiplier: 700 }] },
+  { emoji: "🎰", weight: 1, payouts: [{ matches: 3, multiplier: 55 }, { matches: 4, multiplier: 220 }, { matches: 5, multiplier: 1500 }] },
 ];
-
-// Any 2-of-3 match (not all 3) pays 1.5x — a real, modest win instead of a
-// breakeven "so close," same near-miss framing the app already uses for
-// real bets, just tipped in the player's favor. Combined with the 3-match
-// table above this puts the game at roughly 105% RTP (a net-positive game
-// for players on average) rather than the ~94% a flat 1x would give —
-// deliberately generous, not a balance bug.
-const NEAR_MISS_MULTIPLIER = 1.5;
 
 function rollSymbol(): string {
   const totalWeight = SLOTS_SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
@@ -34,15 +42,28 @@ function rollSymbol(): string {
 }
 
 export function rollReels(): string[] {
-  return [rollSymbol(), rollSymbol(), rollSymbol()];
+  return Array.from({ length: SLOTS_REELS }, rollSymbol);
 }
 
+// Pays on whichever symbol has the most matches among the 5 reels, as long
+// as that's at least 3 (two different symbols can't both reach 3 out of 5,
+// so there's never more than one winning symbol to pick between).
 export function calculateSlotsPayout(reels: string[], amount: number): number {
-  const [a, b, c] = reels;
-  if (a === b && b === c) {
-    const symbol = SLOTS_SYMBOLS.find((s) => s.emoji === a);
-    return symbol ? amount * symbol.payout : 0;
+  const counts = new Map<string, number>();
+  for (const r of reels) counts.set(r, (counts.get(r) ?? 0) + 1);
+
+  let bestEmoji: string | null = null;
+  let bestCount = 0;
+  for (const [emoji, count] of counts) {
+    if (count > bestCount) {
+      bestCount = count;
+      bestEmoji = emoji;
+    }
   }
-  if (a === b || b === c || a === c) return amount * NEAR_MISS_MULTIPLIER;
-  return 0;
+  if (!bestEmoji || bestCount < 3) return 0;
+
+  const symbol = SLOTS_SYMBOLS.find((s) => s.emoji === bestEmoji);
+  if (!symbol) return 0;
+  const tier = symbol.payouts.find((p) => p.matches === bestCount) ?? symbol.payouts[symbol.payouts.length - 1];
+  return amount * tier.multiplier;
 }
