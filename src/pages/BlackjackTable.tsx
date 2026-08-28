@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   autoStandBlackjackTableSeatIfDue,
@@ -8,7 +8,6 @@ import {
   hitBlackjackTableSeat,
   joinBlackjackTable,
   leaveBlackjackTable,
-  mySeatAtBlackjackTable,
   nudgeBlackjackTableIfStale,
   placeBlackjackTableBet,
   pollBlackjackTable,
@@ -59,6 +58,9 @@ export function BlackjackTable() {
   const [now, setNow] = useState(() => Date.now());
   const [resolvedAt, setResolvedAt] = useState<{ tableId: string; at: number } | null>(null);
 
+  const mySeat = user ? (state.blackjackTableSeats.find((s) => s.userId === user.id) ?? null) : null;
+  const occupied = state.blackjackTableSeats.length > 0;
+
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(id);
@@ -72,14 +74,35 @@ export function BlackjackTable() {
     return () => clearInterval(id);
   }, []);
 
+  // Auto-leave on navigating away — a seat left behind by someone who just
+  // clicked to another page would otherwise sit there forever, keeping the
+  // table from ever going quiet. Only fires between rounds (same rule as
+  // the manual "Leave table" button); a live hand is never abandoned.
+  const mySeatRef = useRef(mySeat);
+  useEffect(() => {
+    mySeatRef.current = mySeat;
+  }, [mySeat]);
+  useEffect(() => {
+    return () => {
+      const seat = mySeatRef.current;
+      if (seat && (seat.status === "seated" || seat.status === "resolved")) {
+        leaveBlackjackTable(seat.id).catch(() => {});
+      }
+    };
+  }, []);
+
   // Phase engine: whichever client's timer gets here first drives the table
   // forward. All writes are atomic-claim guarded in the store, so
-  // simultaneous triggers from other open tabs are harmless.
+  // simultaneous triggers from other open tabs are harmless. Frozen
+  // entirely while no one's seated — no live hand can exist with zero
+  // seats (leaving mid-hand is blocked), so there's nothing to advance,
+  // and joinBlackjackTable gives the next person a fresh betting window.
   useEffect(() => {
     if (!table) {
       ensureBlackjackTable().catch(() => {});
       return;
     }
+    if (!occupied) return;
 
     if (table.status === "betting" && now >= new Date(table.bettingClosesAt).getTime()) {
       closeBlackjackTableBettingIfDue(table).catch(() => {});
@@ -101,7 +124,7 @@ export function BlackjackTable() {
         ensureNextBlackjackRound(table).catch(() => {});
       }
     }
-  }, [table, now, resolvedAt]);
+  }, [table, now, resolvedAt, occupied]);
 
   if (!user) return null;
   if (!table) {
@@ -115,7 +138,6 @@ export function BlackjackTable() {
   const seats: (BlackjackTableSeat | null)[] = Array.from({ length: BLACKJACK_TABLE_SEATS }, (_, i) =>
     state.blackjackTableSeats.find((s) => s.seatIndex === i) ?? null,
   );
-  const mySeat = mySeatAtBlackjackTable(user.id);
   const isMyTurn = table.status === "player_turns" && mySeat && table.currentSeatIndex === mySeat.seatIndex;
   const dealerTotal = table.dealerCards ? handValue(table.dealerCards) : null;
   const dealerRevealed = table.status === "dealer_turn" || table.status === "resolved";
@@ -220,11 +242,13 @@ export function BlackjackTable() {
         </div>
 
         <p className="mt-3 font-display text-sm font-semibold text-(--color-ink)">
-          {table.status === "betting" && `Place your bets · ${secondsLeft}s`}
-          {table.status === "player_turns" &&
+          {!occupied && "Table's empty — sit down to start a round"}
+          {occupied && table.status === "betting" && `Place your bets · ${secondsLeft}s`}
+          {occupied &&
+            table.status === "player_turns" &&
             (isMyTurn ? `Your turn${turnSecondsLeft !== null ? ` · ${turnSecondsLeft}s` : ""}` : "Players acting…")}
-          {table.status === "dealer_turn" && "Dealer playing…"}
-          {table.status === "resolved" && "Round over"}
+          {occupied && table.status === "dealer_turn" && "Dealer playing…"}
+          {occupied && table.status === "resolved" && "Round over"}
         </p>
       </div>
 

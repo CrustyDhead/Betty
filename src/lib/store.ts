@@ -1715,6 +1715,8 @@ export function mySeatAtBlackjackTable(userId: string): BlackjackTableSeat | nul
 export async function joinBlackjackTable(tableId: string, userId: string, seatIndex: number): Promise<void> {
   if (mySeatAtBlackjackTable(userId)) throw new Error("Already seated");
   const client = requireClient();
+  const wasEmpty = state.blackjackTableSeats.every((s) => s.tableId !== tableId);
+
   const { data, error } = await client
     .from("blackjack_table_seats")
     .insert({ table_id: tableId, seat_index: seatIndex, user_id: userId, status: "seated" })
@@ -1725,6 +1727,26 @@ export async function joinBlackjackTable(tableId: string, userId: string, seatIn
     throw new Error(error.message);
   }
   setState({ blackjackTableSeats: upsertById(state.blackjackTableSeats, mapBlackjackTableSeat(data)) });
+
+  // The table freezes (see the page's phase engine) once it's empty rather
+  // than cycling rounds with no one there — so the first person back needs
+  // a fresh betting window, not whatever stale countdown was left behind.
+  if (wasEmpty) {
+    const { data: tableRow, error: tableErr } = await client
+      .from("blackjack_table")
+      .update({
+        status: "betting",
+        betting_closes_at: new Date(Date.now() + BLACKJACK_TABLE_BETTING_MS).toISOString(),
+        dealer_cards: null,
+        current_seat_index: null,
+        turn_ends_at: null,
+        resolved_at: null,
+      })
+      .eq("id", tableId)
+      .select()
+      .maybeSingle();
+    if (!tableErr && tableRow) setState({ blackjackTable: mapBlackjackTable(tableRow) });
+  }
 }
 
 // Only lets someone leave between rounds — walking away mid-hand would
