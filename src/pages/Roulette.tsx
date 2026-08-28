@@ -243,20 +243,35 @@ export function Roulette() {
           const key = betKey(b.type, null);
           const mine = myTotals.get(key);
           const total = totals.get(key);
+          const isColorBet = b.type === "red" || b.type === "black";
           return (
             <button
               key={b.type}
               type="button"
               disabled={round.status !== "betting" || placing}
               onClick={() => handleBet(b.type, null)}
-              className="relative rounded-lg bg-(--color-surface) py-2.5 text-sm font-medium text-(--color-ink) shadow-sm shadow-black/5 transition hover:-translate-y-0.5 hover:shadow-md disabled:opacity-60 disabled:hover:translate-y-0"
+              className={`relative rounded-lg py-2.5 text-sm font-medium shadow-sm shadow-black/5 transition hover:-translate-y-0.5 hover:shadow-md disabled:opacity-60 disabled:hover:translate-y-0 ${
+                isColorBet
+                  ? colorClasses(b.type as "red" | "black")
+                  : "bg-(--color-surface) text-(--color-ink)"
+              }`}
             >
               {b.label}
               {total !== undefined && (
-                <span className="mt-0.5 block font-mono text-xs text-(--color-ink-soft)">{total}</span>
+                <span
+                  className={`mt-0.5 block font-mono text-xs ${
+                    isColorBet ? "text-white/80" : "text-(--color-ink-soft)"
+                  }`}
+                >
+                  {total}
+                </span>
               )}
               {mine !== undefined && (
-                <span className="absolute -top-1.5 -right-1.5 rounded-full bg-(--color-ink) px-1 text-[10px] font-bold text-white shadow">
+                <span
+                  className={`absolute -top-1.5 -right-1.5 rounded-full px-1 text-[10px] font-bold shadow ${
+                    isColorBet ? "bg-white text-(--color-ink)" : "bg-(--color-ink) text-white"
+                  }`}
+                >
                   {mine}
                 </span>
               )}

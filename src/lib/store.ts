@@ -40,7 +40,7 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // 220, due in 7 days. One active loan per user at a time (enforced by a
 // partial unique index in the DB too, not just here).
 export const LOAN_MIN = 10;
-export const LOAN_CAP = 500;
+export const LOAN_CAP = 2000;
 export const LOAN_INTEREST_RATE = 0.1;
 export const LOAN_TERM_MS = 7 * 24 * 60 * 60 * 1000;
 
