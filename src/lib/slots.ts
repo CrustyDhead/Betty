@@ -2,7 +2,7 @@ export const SLOTS_MIN_BET = 10;
 export const SLOTS_REELS = 5;
 
 export interface SlotsPayoutTier {
-  matches: number; // how many of the 5 reels need to show this symbol
+  matches: number; // consecutive reels matched, starting from reel 1 (leftmost)
   multiplier: number;
 }
 
@@ -12,23 +12,24 @@ export interface SlotsSymbol {
   payouts: SlotsPayoutTier[]; // 3, 4, 5-of-a-kind, rarest symbol last
 }
 
-// 8 symbols across 5 reels, weighted so the rarest (🎰) is genuinely rare.
-// A win requires at least 3 of the 5 reels to match — no payout for just a
-// pair anymore (that "any 2 matching" freebie, combined with only 3 reels,
-// used to fire on ~63% of spins and push RTP to ~121%; see slots RTP audit
-// in chat). With 5 reels and an 8-symbol table, a 3+ match happens on
-// ~30% of spins and this payout table lands at ~88.5% RTP overall —
-// meaningfully harder, still a normal generous-house-edge game rather than
-// a guaranteed money printer.
+// A real machine pays on a payline: matching symbols have to run
+// consecutively starting from the leftmost reel — landing 🍒 on reels
+// 1, 3, and 5 isn't a win, only reels 1-2-3 (or further) in a row counts.
+// The previous version paid on "any 3+ matching anywhere," which isn't how
+// any real slot machine works and made wins much too frequent for a
+// weighted 8-symbol table. A strict payline drops the win rate to ~4.6% of
+// spins — genuinely rare, matching real machines' volatility — so payouts
+// are scaled up accordingly to land at the same ~88% RTP as before: rare
+// wins, but a real one when it lands.
 export const SLOTS_SYMBOLS: SlotsSymbol[] = [
-  { emoji: "🍒", weight: 30, payouts: [{ matches: 3, multiplier: 1 }, { matches: 4, multiplier: 4 }, { matches: 5, multiplier: 30 }] },
-  { emoji: "🍋", weight: 22, payouts: [{ matches: 3, multiplier: 2 }, { matches: 4, multiplier: 7 }, { matches: 5, multiplier: 48 }] },
-  { emoji: "🍊", weight: 18, payouts: [{ matches: 3, multiplier: 3 }, { matches: 4, multiplier: 11 }, { matches: 5, multiplier: 70 }] },
-  { emoji: "🔔", weight: 12, payouts: [{ matches: 3, multiplier: 5 }, { matches: 4, multiplier: 18 }, { matches: 5, multiplier: 120 }] },
-  { emoji: "⭐", weight: 8, payouts: [{ matches: 3, multiplier: 9 }, { matches: 4, multiplier: 30 }, { matches: 5, multiplier: 220 }] },
-  { emoji: "💎", weight: 6, payouts: [{ matches: 3, multiplier: 14 }, { matches: 4, multiplier: 48 }, { matches: 5, multiplier: 360 }] },
-  { emoji: "7️⃣", weight: 3, payouts: [{ matches: 3, multiplier: 28 }, { matches: 4, multiplier: 120 }, { matches: 5, multiplier: 700 }] },
-  { emoji: "🎰", weight: 1, payouts: [{ matches: 3, multiplier: 55 }, { matches: 4, multiplier: 220 }, { matches: 5, multiplier: 1500 }] },
+  { emoji: "🍒", weight: 30, payouts: [{ matches: 3, multiplier: 3 }, { matches: 4, multiplier: 13 }, { matches: 5, multiplier: 130 }] },
+  { emoji: "🍋", weight: 22, payouts: [{ matches: 3, multiplier: 5 }, { matches: 4, multiplier: 25 }, { matches: 5, multiplier: 220 }] },
+  { emoji: "🍊", weight: 18, payouts: [{ matches: 3, multiplier: 8 }, { matches: 4, multiplier: 45 }, { matches: 5, multiplier: 350 }] },
+  { emoji: "🔔", weight: 12, payouts: [{ matches: 3, multiplier: 14 }, { matches: 4, multiplier: 80 }, { matches: 5, multiplier: 580 }] },
+  { emoji: "⭐", weight: 8, payouts: [{ matches: 3, multiplier: 25 }, { matches: 4, multiplier: 140 }, { matches: 5, multiplier: 1000 }] },
+  { emoji: "💎", weight: 6, payouts: [{ matches: 3, multiplier: 45 }, { matches: 4, multiplier: 260 }, { matches: 5, multiplier: 1600 }] },
+  { emoji: "7️⃣", weight: 3, payouts: [{ matches: 3, multiplier: 100 }, { matches: 4, multiplier: 520 }, { matches: 5, multiplier: 2900 }] },
+  { emoji: "🎰", weight: 1, payouts: [{ matches: 3, multiplier: 220 }, { matches: 4, multiplier: 1100 }, { matches: 5, multiplier: 6200 }] },
 ];
 
 function rollSymbol(): string {
@@ -45,25 +46,20 @@ export function rollReels(): string[] {
   return Array.from({ length: SLOTS_REELS }, rollSymbol);
 }
 
-// Pays on whichever symbol has the most matches among the 5 reels, as long
-// as that's at least 3 (two different symbols can't both reach 3 out of 5,
-// so there's never more than one winning symbol to pick between).
+// Payline payout: the length of the run of matching symbols starting at
+// reel 1 (leftmost), stopping at the first reel that breaks it. Only that
+// run counts — a symbol repeating later after a break doesn't add to it.
 export function calculateSlotsPayout(reels: string[], amount: number): number {
-  const counts = new Map<string, number>();
-  for (const r of reels) counts.set(r, (counts.get(r) ?? 0) + 1);
-
-  let bestEmoji: string | null = null;
-  let bestCount = 0;
-  for (const [emoji, count] of counts) {
-    if (count > bestCount) {
-      bestCount = count;
-      bestEmoji = emoji;
-    }
+  const first = reels[0];
+  let runLength = 1;
+  for (let i = 1; i < reels.length; i++) {
+    if (reels[i] !== first) break;
+    runLength++;
   }
-  if (!bestEmoji || bestCount < 3) return 0;
+  if (runLength < 3) return 0;
 
-  const symbol = SLOTS_SYMBOLS.find((s) => s.emoji === bestEmoji);
+  const symbol = SLOTS_SYMBOLS.find((s) => s.emoji === first);
   if (!symbol) return 0;
-  const tier = symbol.payouts.find((p) => p.matches === bestCount) ?? symbol.payouts[symbol.payouts.length - 1];
+  const tier = symbol.payouts.find((p) => p.matches === runLength) ?? symbol.payouts[symbol.payouts.length - 1];
   return amount * tier.multiplier;
 }

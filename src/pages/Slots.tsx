@@ -95,17 +95,19 @@ export function Slots() {
       {showHelp && (
         <HelpModal title="How to play Slots" onClose={() => setShowHelp(false)}>
           <p>
-            Pick a bet size and spin {SLOTS_REELS} reels. You need at least <strong>3 of the same symbol</strong>{" "}
-            among the {SLOTS_REELS} reels to win anything — position doesn't matter, just how many reels show that
-            symbol.
+            Pick a bet size and spin {SLOTS_REELS} reels. Real payline rules: matching symbols have to run{" "}
+            <strong>left to right starting from reel 1</strong> — landing the same symbol on reels 1, 3, and 5 isn't
+            a win, only a run like 1-2-3 (or further) counts. You need at least 3 in a row from the left to win
+            anything.
           </p>
           <p>
-            Each symbol has its own payout for 3, 4, or 5 matches, shown in the Payouts table below — rarer symbols
-            (fewer of them on the reels) pay much more. Your winnings are your bet × that multiplier.
+            Each symbol has its own payout for a 3, 4, or 5-long run, shown in the Payouts table below — rarer
+            symbols (fewer of them on the reels) pay much more. Your winnings are your bet × that multiplier. Real
+            paylines make wins genuinely rare, so the payouts are big when they land.
           </p>
           <p className="text-(--color-ink-soft)">
-            Example: bet 10, land 4× 💎 → 4-match pays 48x → you get back 480 tokens. Minimum bet {SLOTS_MIN_BET}{" "}
-            tokens.
+            Example: bet 10, reels 1-4 all land 💎 (reel 5 different) → 4-in-a-row pays 260x → you get back 2,600
+            tokens. Minimum bet {SLOTS_MIN_BET} tokens.
           </p>
         </HelpModal>
       )}
@@ -192,7 +194,7 @@ export function Slots() {
           ))}
         </div>
         <p className="mt-2 text-xs text-(--color-ink-soft)">
-          Need 3+ of the same symbol among the {SLOTS_REELS} reels to win. Minimum bet {SLOTS_MIN_BET} tokens.
+          Payline pays: need 3+ matching in a row starting from reel 1 (left). Minimum bet {SLOTS_MIN_BET} tokens.
         </p>
       </div>
 
