@@ -421,7 +421,7 @@ export function PokerTable() {
                     </div>
                   )}
 
-                  {seat.status === "folded" && (
+                  {seat.status === "folded" && !result && (
                     <p className="mt-1 text-center text-xs font-semibold text-(--color-ink-soft)">Folded</p>
                   )}
                   {seat.status === "all_in" && (
