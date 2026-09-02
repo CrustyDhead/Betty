@@ -2187,12 +2187,24 @@ function pokerSeatsForTable(tableId: string): PokerTableSeat[] {
   return state.pokerTableSeats.filter((s) => s.tableId === tableId).sort((a, b) => a.seatIndex - b.seatIndex);
 }
 
-function pokerInHandSeats(tableId: string): PokerTableSeat[] {
-  return pokerSeatsForTable(tableId).filter((s) => s.status === "active" || s.status === "all_in");
-}
-
-function pokerActingSeats(tableId: string): PokerTableSeat[] {
-  return pokerSeatsForTable(tableId).filter((s) => s.status === "active");
+// A fresh, non-cached read of every seat at this table, merged back into
+// shared state. Deciding whether a betting round is closed (and whether to
+// auto-run the board because "everyone's all-in") must never trust the
+// locally polled cache — right after a hand deals or a turn advances, that
+// cache can briefly under-count active players relative to the real DB
+// state, and an under-count here means racing straight to showdown and
+// silently skipping someone's actual turn.
+async function fetchFreshPokerSeats(tableId: string): Promise<PokerTableSeat[]> {
+  const client = requireClient();
+  const { data, error } = await client
+    .from("poker_table_seats")
+    .select("*")
+    .eq("table_id", tableId)
+    .order("seat_index", { ascending: true });
+  if (error || !data) return pokerSeatsForTable(tableId);
+  const fresh = data.map(mapPokerTableSeat);
+  setState({ pokerTableSeats: [...state.pokerTableSeats.filter((s) => s.tableId !== tableId), ...fresh] });
+  return fresh;
 }
 
 // Seated (between-hand) players with enough balance to post the big blind.
@@ -2529,7 +2541,8 @@ export async function raisePokerSeat(seatId: string, raiseToAmount: number): Pro
 // bet (or is all-in) since the last raise. `wasAggression` resets who
 // still needs to respond; everything else just needs to catch up.
 async function advancePokerAction(tableId: string, actingSeatIndex: number, wasAggression: boolean): Promise<void> {
-  const inHand = pokerInHandSeats(tableId);
+  const freshSeats = await fetchFreshPokerSeats(tableId);
+  const inHand = freshSeats.filter((s) => s.status === "active" || s.status === "all_in");
   if (inHand.length <= 1) {
     await awardPokerPotUncontested(tableId, inHand[0] ?? null);
     return;
@@ -2538,7 +2551,7 @@ async function advancePokerAction(tableId: string, actingSeatIndex: number, wasA
   const table = state.pokerTable;
   if (!table || table.id !== tableId) return;
 
-  const acting = pokerActingSeats(tableId);
+  const acting = freshSeats.filter((s) => s.status === "active").sort((a, b) => a.seatIndex - b.seatIndex);
   const actedSeatIndices = wasAggression ? [actingSeatIndex] : [...table.actedSeatIndices, actingSeatIndex];
   const allCaughtUp = acting.every((s) => actedSeatIndices.includes(s.seatIndex));
 
@@ -2589,7 +2602,8 @@ async function advancePokerStreet(tableId: string): Promise<void> {
   const dealt = deck.splice(0, dealCount);
   const newCommunity = [...table.communityCards, ...dealt];
 
-  const inHand = pokerInHandSeats(tableId);
+  const freshSeats = await fetchFreshPokerSeats(tableId);
+  const inHand = freshSeats.filter((s) => s.status === "active" || s.status === "all_in");
   await Promise.all(
     inHand.map((s) =>
       client.from("poker_table_seats").update({ street_committed: 0, last_action: null }).eq("id", s.id),
@@ -2643,7 +2657,8 @@ async function resolvePokerShowdown(tableId: string): Promise<void> {
   const table = mapPokerTable(claimedRow);
   setState({ pokerTable: table });
 
-  const inHand = pokerInHandSeats(tableId);
+  const freshSeats = await fetchFreshPokerSeats(tableId);
+  const inHand = freshSeats.filter((s) => s.status === "active" || s.status === "all_in");
   const { data: revealed, error: revealErr } = await client.rpc("reveal_showdown_hole_cards", {
     p_table_id: tableId,
   });
@@ -2751,12 +2766,38 @@ async function awardPokerPotUncontested(tableId: string, winnerSeat: PokerTableS
 
 // If the seat the table thinks is "current" has already settled some
 // other way (a race between two advance calls), nudge the turn forward
-// instead of waiting on it forever — same idea as Blackjack Table's.
+// instead of waiting on it forever — same idea as Blackjack Table's. This
+// runs unconditionally every ~200ms from every open Poker tab (not just the
+// acting player's), so it must be conservative: the locally polled cache
+// can briefly disagree with the real DB state right after a hand deals or a
+// turn advances (a table-row update can land before its matching seat-row
+// update does), and treating that transient mismatch as "this seat is
+// stale" would wrongly mark a real, live turn as having acted — silently
+// skipping it. The cheap local check below is just a fast-path filter for
+// the common case; anything it flags gets a fresh read before acting on it.
 export async function nudgePokerTableIfStale(table: PokerTable): Promise<void> {
   if (!["preflop", "flop", "turn", "river"].includes(table.status)) return;
   if (table.currentSeatIndex === null) return;
-  const seat = state.pokerTableSeats.find((s) => s.tableId === table.id && s.seatIndex === table.currentSeatIndex);
-  if (seat && seat.status === "active") return;
+  const cachedSeat = state.pokerTableSeats.find((s) => s.tableId === table.id && s.seatIndex === table.currentSeatIndex);
+  if (cachedSeat && cachedSeat.status === "active") return;
+
+  const client = requireClient();
+  const { data: freshTable } = await client
+    .from("poker_table")
+    .select("current_seat_index, status")
+    .eq("id", table.id)
+    .maybeSingle();
+  if (!freshTable || freshTable.current_seat_index !== table.currentSeatIndex || freshTable.status !== table.status) {
+    return; // the table's already moved on since we read `table` — nothing to nudge
+  }
+  const { data: freshSeat } = await client
+    .from("poker_table_seats")
+    .select("status")
+    .eq("table_id", table.id)
+    .eq("seat_index", table.currentSeatIndex)
+    .maybeSingle();
+  if (freshSeat && freshSeat.status === "active") return; // it really is still their turn
+
   await advancePokerAction(table.id, table.currentSeatIndex, false);
 }
 
