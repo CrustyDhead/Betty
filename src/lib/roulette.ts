@@ -71,11 +71,20 @@ function betWins(bet: { betType: RouletteBetType; betValue: string | null }, win
 // 2x total for every even-money outside bet (1:1 + stake back). A lucky
 // number that hits replaces the straight-up payout with stake x multiplier
 // entirely — outside bets are never affected by lucky numbers.
+//
+// La Partage: real single-zero tables (French/European rules) don't make
+// an even-money outside bet a total loss when 0 hits — half the stake
+// comes back instead. Straight-up number bets aren't covered by this (0 is
+// still just a number for them, paying the usual 36x if it's the one you
+// picked).
 export function calculatePayout(
   bet: Pick<RouletteBet, "betType" | "betValue" | "amount">,
   winningNumber: number,
   luckyNumbers: RouletteLuckyNumber[] | null,
 ): number {
+  if (winningNumber === 0 && bet.betType !== "number") {
+    return bet.amount * 0.5;
+  }
   if (!betWins(bet, winningNumber)) return 0;
   if (bet.betType === "number") {
     const lucky = luckyNumbers?.find((l) => l.number === winningNumber);

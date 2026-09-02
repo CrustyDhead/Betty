@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { spinSlots } from "../lib/store";
 import { useCurrentUser, useStoreState } from "../lib/useStore";
@@ -7,17 +7,33 @@ import { HelpButton, HelpModal } from "../components/HelpModal";
 import { SLOTS_MIN_BET, SLOTS_REELS, SLOTS_SYMBOLS } from "../lib/slots";
 
 const CHIP_VALUES = [10, 50, 100, 500] as const;
+const FLICKER_MS = 80;
+// Each reel locks in a bit later than the last, left to right, like a real
+// machine's reels stopping one at a time instead of all snapping at once.
+const REEL_STOP_DELAYS_MS = [500, 850, 1200, 1550, 1900];
+
+function randomEmoji(): string {
+  return SLOTS_SYMBOLS[Math.floor(Math.random() * SLOTS_SYMBOLS.length)].emoji;
+}
 
 export function Slots() {
   const user = useCurrentUser();
   const state = useStoreState();
 
   const [chip, setChip] = useState<(typeof CHIP_VALUES)[number]>(10);
-  const [reels, setReels] = useState<string[] | null>(null);
+  const [displayReels, setDisplayReels] = useState<string[]>(() => Array.from({ length: SLOTS_REELS }, () => "❔"));
+  const [lockedCount, setLockedCount] = useState(SLOTS_REELS);
   const [spinning, setSpinning] = useState(false);
   const [lastPayout, setLastPayout] = useState<{ amount: number; payout: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    return () => {
+      timers.current.forEach(clearTimeout);
+    };
+  }, []);
 
   if (!user) return null;
 
@@ -28,15 +44,42 @@ export function Slots() {
     setError(null);
     setSpinning(true);
     setLastPayout(null);
+    setLockedCount(0);
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+
+    let finalReels: string[];
+    let payoutResult: { amount: number; payout: number };
     try {
       const spin = await spinSlots(user.id, chip);
-      setReels(spin.reels);
-      setLastPayout({ amount: spin.amount, payout: spin.payout });
+      finalReels = spin.reels;
+      payoutResult = { amount: spin.amount, payout: spin.payout };
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
       setSpinning(false);
+      setLockedCount(SLOTS_REELS);
+      return;
     }
+
+    const lockedCountRef = { current: 0 };
+    const flicker = setInterval(() => {
+      setDisplayReels((prev) => prev.map((s, i) => (i >= lockedCountRef.current ? randomEmoji() : s)));
+    }, FLICKER_MS);
+    timers.current.push(flicker as unknown as ReturnType<typeof setTimeout>);
+
+    REEL_STOP_DELAYS_MS.slice(0, SLOTS_REELS).forEach((delay, i) => {
+      const t = setTimeout(() => {
+        lockedCountRef.current = i + 1;
+        setLockedCount(i + 1);
+        setDisplayReels((prev) => prev.map((s, idx) => (idx === i ? finalReels[i] : s)));
+        if (i === SLOTS_REELS - 1) {
+          clearInterval(flicker);
+          setLastPayout(payoutResult);
+          setSpinning(false);
+        }
+      }, delay);
+      timers.current.push(t);
+    });
   }
 
   return (
@@ -69,10 +112,12 @@ export function Slots() {
 
       <div className="mt-4 rounded-2xl bg-(--color-surface) p-6 text-center shadow-sm shadow-black/5">
         <div className="flex justify-center gap-1.5 sm:gap-3">
-          {(reels ?? Array.from({ length: SLOTS_REELS }, () => "❔")).map((symbol, i) => (
+          {displayReels.map((symbol, i) => (
             <div
               key={i}
-              className="flex h-14 w-14 items-center justify-center rounded-2xl bg-(--color-bg) text-2xl shadow-inner sm:h-20 sm:w-20 sm:text-4xl"
+              className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-(--color-bg) text-2xl shadow-inner transition-transform sm:h-20 sm:w-20 sm:text-4xl ${
+                spinning && i >= lockedCount ? "animate-pulse" : spinning && i === lockedCount - 1 ? "scale-110" : ""
+              }`}
             >
               {symbol}
             </div>

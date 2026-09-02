@@ -184,6 +184,10 @@ export function Roulette() {
             <strong>Outside bets</strong> (color, odd/even, high/low): pay 2x your stake (even money) if it hits.
           </p>
           <p>
+            <strong>0 &amp; La Partage:</strong> 0 is uncovered by outside bets — but instead of losing the whole
+            stake, you get half back, same as real single-zero tables.
+          </p>
+          <p>
             <strong>⚡ Lucky numbers:</strong> each round, 3 random numbers get a random multiplier (50x, 100x, 200x,
             or 500x, bigger ones rarer). If a straight-up bet on a lucky number hits, it pays that multiplier instead
             of the usual 36x — outside bets are never affected by lucky numbers.
