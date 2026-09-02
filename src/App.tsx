@@ -16,6 +16,7 @@ import { Roulette } from "./pages/Roulette";
 import { Slots } from "./pages/Slots";
 import { Blackjack } from "./pages/Blackjack";
 import { BlackjackTable } from "./pages/BlackjackTable";
+import { PokerTable } from "./pages/PokerTable";
 import { Admin } from "./pages/Admin";
 
 export default function App() {
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/casino/slots" element={<Slots />} />
         <Route path="/casino/blackjack" element={<Blackjack />} />
         <Route path="/casino/blackjack/table" element={<BlackjackTable />} />
+        <Route path="/casino/poker" element={<PokerTable />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/profile/:userId" element={<Profile />} />
         <Route path="/admin" element={<Admin />} />

@@ -187,3 +187,41 @@ export interface BlackjackTableSeat {
   payout: number | null;
   joinedAt: string;
 }
+
+export type PokerTableStatus = "waiting" | "preflop" | "flop" | "turn" | "river" | "showdown" | "hand_over";
+export type PokerSeatStatus = "seated" | "active" | "folded" | "all_in";
+export type PokerAction = "blind" | "fold" | "check" | "call" | "raise" | "all_in";
+export type PokerResult = "won" | "lost" | "split" | "folded";
+
+export interface PokerTable {
+  id: string;
+  status: PokerTableStatus;
+  buttonSeatIndex: number | null;
+  currentSeatIndex: number | null;
+  turnEndsAt: string | null;
+  actedSeatIndices: number[];
+  currentBet: number;
+  minRaise: number;
+  handCap: number | null;
+  pot: number;
+  communityCards: PlayingCard[];
+  deck: PlayingCard[];
+  handNumber: number;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface PokerTableSeat {
+  id: string;
+  tableId: string;
+  seatIndex: number;
+  userId: string;
+  status: PokerSeatStatus;
+  handCommitted: number;
+  streetCommitted: number;
+  lastAction: PokerAction | null;
+  result: PokerResult | null;
+  resultAmount: number | null;
+  revealedHoleCards: PlayingCard[] | null;
+  joinedAt: string;
+}

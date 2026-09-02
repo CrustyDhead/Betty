@@ -10,6 +10,8 @@ import type {
   Comment,
   Loan,
   PlayingCard,
+  PokerTable,
+  PokerTableSeat,
   RouletteBet,
   RouletteBetType,
   RouletteRound,
@@ -32,6 +34,7 @@ import {
   playDealerHand,
   resolveHand,
 } from "./blackjack";
+import { POKER_BIG_BLIND, POKER_SMALL_BLIND, POKER_TURN_MS, compareHands, createShuffledDeck, evaluateBestHand } from "./poker";
 
 /**
  * Supabase-backed data layer (see supabase/schema.sql +
@@ -82,6 +85,8 @@ interface State {
   blackjackHands: BlackjackHand[];
   blackjackTable: BlackjackTable | null;
   blackjackTableSeats: BlackjackTableSeat[];
+  pokerTable: PokerTable | null;
+  pokerTableSeats: PokerTableSeat[];
   signupCodes: SignupCodeRequest[];
   loading: boolean;
   error: string | null;
@@ -100,6 +105,8 @@ let state: State = {
   blackjackHands: [],
   blackjackTable: null,
   blackjackTableSeats: [],
+  pokerTable: null,
+  pokerTableSeats: [],
   signupCodes: [],
   loading: true,
   error: null,
@@ -298,6 +305,42 @@ function mapBlackjackTableSeat(row: Row): BlackjackTableSeat {
   };
 }
 
+function mapPokerTable(row: Row): PokerTable {
+  return {
+    id: row.id,
+    status: row.status,
+    buttonSeatIndex: row.button_seat_index ?? null,
+    currentSeatIndex: row.current_seat_index ?? null,
+    turnEndsAt: row.turn_ends_at ?? null,
+    actedSeatIndices: row.acted_seat_indices ?? [],
+    currentBet: Number(row.current_bet),
+    minRaise: Number(row.min_raise),
+    handCap: row.hand_cap === null ? null : Number(row.hand_cap),
+    pot: Number(row.pot),
+    communityCards: row.community_cards ?? [],
+    deck: row.deck ?? [],
+    handNumber: Number(row.hand_number),
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at ?? null,
+  };
+}
+function mapPokerTableSeat(row: Row): PokerTableSeat {
+  return {
+    id: row.id,
+    tableId: row.table_id,
+    seatIndex: row.seat_index,
+    userId: row.user_id,
+    status: row.status,
+    handCommitted: Number(row.hand_committed),
+    streetCommitted: Number(row.street_committed),
+    lastAction: row.last_action ?? null,
+    result: row.result ?? null,
+    resultAmount: row.result_amount === null ? null : Number(row.result_amount),
+    revealedHoleCards: row.revealed_hole_cards ?? null,
+    joinedAt: row.joined_at,
+  };
+}
+
 function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   const idx = list.findIndex((x) => x.id === item.id);
   if (idx === -1) return [...list, item];
@@ -351,6 +394,7 @@ async function fetchAll() {
   await fetchSlotsSpins();
   await fetchBlackjackHands();
   await pollBlackjackTable();
+  await pollPokerTable();
   await fetchSignupCodes();
 }
 
@@ -486,6 +530,19 @@ export async function pollBlackjackTable() {
   });
 }
 
+export async function pollPokerTable() {
+  const client = requireClient();
+  const [table, seats] = await Promise.all([
+    client.from("poker_table").select("*").limit(1),
+    client.from("poker_table_seats").select("*").order("seat_index", { ascending: true }),
+  ]);
+  if (table.error || seats.error) return;
+  setState({
+    pokerTable: table.data && table.data[0] ? mapPokerTable(table.data[0]) : null,
+    pokerTableSeats: (seats.data ?? []).map(mapPokerTableSeat),
+  });
+}
+
 export function notificationPermission(): NotificationPermission | "unsupported" {
   if (typeof Notification === "undefined") return "unsupported";
   return Notification.permission;
@@ -548,6 +605,13 @@ export async function initStore() {
     .on("postgres_changes", { event: "*", schema: "public", table: "blackjack_table_seats" }, (payload) =>
       applyChange(payload, "blackjackTableSeats", mapBlackjackTableSeat),
     )
+    .on("postgres_changes", { event: "*", schema: "public", table: "poker_table" }, (payload) => {
+      if (payload.eventType === "DELETE") return; // singleton, never deleted in practice
+      setState({ pokerTable: mapPokerTable(payload.new as Row) });
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "poker_table_seats" }, (payload) =>
+      applyChange(payload, "pokerTableSeats", mapPokerTableSeat),
+    )
     .subscribe();
 
   setInterval(() => {
@@ -573,7 +637,8 @@ function applyChange<
     | "loans"
     | "slotsSpins"
     | "blackjackHands"
-    | "blackjackTableSeats",
+    | "blackjackTableSeats"
+    | "pokerTableSeats",
 >(
   payload: RealtimePostgresChangesPayload<Row>,
   key: K,
@@ -2105,4 +2170,647 @@ export async function ensureNextBlackjackRound(table: BlackjackTable): Promise<v
     for (const row of seatRows) seats = upsertById(seats, mapBlackjackTableSeat(row));
     setState({ blackjackTableSeats: seats });
   }
+}
+
+// ---- Poker (Texas Hold'em, 6-max) ----
+// Same shared-table, client-driven atomic-claim pattern as Blackjack Table.
+// Simplified no-limit: every hand freezes a hand_cap = the smallest stack
+// among players dealt in, and no commitment can ever exceed it — so no one
+// can ever be forced all-in for less than another player's bet, which
+// means side pots are structurally impossible here (see 0026_poker.sql).
+// Hole cards are never put in this module's shared `state` — they're
+// fetched per-request via fetchMyHoleCards and kept as page-local React
+// state, since (unlike everything else this app tracks) they're supposed
+// to be secret from other players.
+
+function pokerSeatsForTable(tableId: string): PokerTableSeat[] {
+  return state.pokerTableSeats.filter((s) => s.tableId === tableId).sort((a, b) => a.seatIndex - b.seatIndex);
+}
+
+function pokerInHandSeats(tableId: string): PokerTableSeat[] {
+  return pokerSeatsForTable(tableId).filter((s) => s.status === "active" || s.status === "all_in");
+}
+
+function pokerActingSeats(tableId: string): PokerTableSeat[] {
+  return pokerSeatsForTable(tableId).filter((s) => s.status === "active");
+}
+
+// Seated (between-hand) players with enough balance to post the big blind.
+function pokerEligibleSeats(tableId: string): PokerTableSeat[] {
+  return pokerSeatsForTable(tableId).filter((s) => {
+    if (s.status !== "seated") return false;
+    const user = state.users.find((u) => u.id === s.userId);
+    return !!user && user.tokenBalance >= POKER_BIG_BLIND;
+  });
+}
+
+// Next seat strictly after `seatIndex` in a sorted, already-filtered seat
+// list, wrapping around — used for button/blind rotation and turn order
+// alike, so "who's next" is always one rule applied to whichever subset of
+// seats is relevant (eligible, in-hand, or still able to act).
+function nextEligibleSeatAfter(sorted: PokerTableSeat[], seatIndex: number): PokerTableSeat {
+  return sorted.find((s) => s.seatIndex > seatIndex) ?? sorted[0];
+}
+
+function pokerCallAmount(table: PokerTable, seat: PokerTableSeat): number {
+  return Math.max(0, table.currentBet - seat.streetCommitted);
+}
+function pokerMaxAdditional(table: PokerTable, seat: PokerTableSeat): number {
+  return Math.max(0, (table.handCap ?? Infinity) - seat.handCommitted);
+}
+
+export async function ensurePokerTable(): Promise<void> {
+  if (state.pokerTable) return;
+  const client = requireClient();
+  const { error } = await client.from("poker_table").insert({ status: "waiting" });
+  if (error && error.code !== "23505") {
+    // Non-critical for a fun feature — the next poll will just retry.
+  }
+}
+
+export function mySeatAtPokerTable(userId: string): PokerTableSeat | null {
+  return state.pokerTableSeats.find((s) => s.userId === userId) ?? null;
+}
+
+// Joining never depends on table status — new seats always start "seated"
+// and only get dealt into the *next* hand, so sitting down mid-hand is
+// always safe and never needs to wait for a particular phase.
+export async function joinPokerTable(tableId: string, userId: string, seatIndex: number): Promise<void> {
+  if (mySeatAtPokerTable(userId)) throw new Error("Already seated");
+  const client = requireClient();
+  const { data, error } = await client
+    .from("poker_table_seats")
+    .insert({ table_id: tableId, seat_index: seatIndex, user_id: userId, status: "seated" })
+    .select()
+    .single();
+  if (error) {
+    if (error.code === "23505") throw new Error("That seat is taken");
+    throw new Error(error.message);
+  }
+  setState({ pokerTableSeats: upsertById(state.pokerTableSeats, mapPokerTableSeat(data)) });
+}
+
+export async function leavePokerTable(seatId: string): Promise<void> {
+  const seat = state.pokerTableSeats.find((s) => s.id === seatId);
+  if (!seat) return;
+  if (seat.status !== "seated") throw new Error("Wait for this hand to finish before leaving");
+  const client = requireClient();
+  const { error } = await client.from("poker_table_seats").delete().eq("id", seatId);
+  if (error) throw new Error(error.message);
+  setState({ pokerTableSeats: removeById(state.pokerTableSeats, seatId) });
+}
+
+// Only your own cards — see 0026_poker.sql's get_my_hole_cards. Not stored
+// in the shared store state; the page caches this itself per-hand.
+export async function fetchMyHoleCards(seatId: string, userId: string): Promise<PlayingCard[] | null> {
+  const client = requireClient();
+  const { data, error } = await client.rpc("get_my_hole_cards", { p_seat_id: seatId, p_user_id: userId });
+  if (error) return null;
+  return (data as PlayingCard[] | null) ?? null;
+}
+
+export async function startPokerHandIfDue(table: PokerTable): Promise<void> {
+  if (table.status !== "waiting") return;
+  const eligible = pokerEligibleSeats(table.id);
+  if (eligible.length < 2) return;
+  await startPokerHand(table, eligible);
+}
+
+async function startPokerHand(table: PokerTable, eligible: PokerTableSeat[]): Promise<void> {
+  const client = requireClient();
+
+  // Atomic claim — only the first caller to flip status out of "waiting"
+  // proceeds to deal; everyone else's call becomes a no-op.
+  const { data: claimedRow, error: claimErr } = await client
+    .from("poker_table")
+    .update({ status: "preflop" })
+    .eq("id", table.id)
+    .eq("status", "waiting")
+    .select()
+    .maybeSingle();
+  if (claimErr || !claimedRow) return;
+
+  const prevButton = table.buttonSeatIndex;
+  const buttonSeat = prevButton === null ? eligible[0] : nextEligibleSeatAfter(eligible, prevButton);
+
+  let sbSeat: PokerTableSeat;
+  let bbSeat: PokerTableSeat;
+  if (eligible.length === 2) {
+    // Heads-up: the button posts the small blind and acts first preflop.
+    sbSeat = buttonSeat;
+    bbSeat = nextEligibleSeatAfter(eligible, buttonSeat.seatIndex);
+  } else {
+    sbSeat = nextEligibleSeatAfter(eligible, buttonSeat.seatIndex);
+    bbSeat = nextEligibleSeatAfter(eligible, sbSeat.seatIndex);
+  }
+  const firstToAct = eligible.length === 2 ? sbSeat : nextEligibleSeatAfter(eligible, bbSeat.seatIndex);
+
+  const handCap = Math.min(...eligible.map((s) => state.users.find((u) => u.id === s.userId)!.tokenBalance));
+  const sbAmount = Math.min(POKER_SMALL_BLIND, handCap);
+  const bbAmount = Math.min(POKER_BIG_BLIND, handCap);
+
+  let deck = createShuffledDeck();
+  const holeCardsBySeat = new Map<string, PlayingCard[]>();
+  for (const seat of eligible) {
+    holeCardsBySeat.set(seat.id, deck.slice(0, 2));
+    deck = deck.slice(2);
+  }
+
+  for (const seat of eligible) {
+    const isSb = seat.id === sbSeat.id;
+    const isBb = seat.id === bbSeat.id;
+    const posted = isSb ? sbAmount : isBb ? bbAmount : 0;
+
+    await client
+      .from("poker_table_seats")
+      .update({
+        status: "active",
+        hand_committed: posted,
+        street_committed: posted,
+        last_action: isSb || isBb ? "blind" : null,
+        result: null,
+        result_amount: null,
+        revealed_hole_cards: null,
+      })
+      .eq("id", seat.id);
+
+    if (posted > 0) {
+      const { data: txnRow, error: txnErr } = await client
+        .from("transactions")
+        .insert({ user_id: seat.userId, type: "poker", amount: -posted })
+        .select()
+        .single();
+      if (!txnErr) {
+        const userRow = await adjustBalance(seat.userId, -posted);
+        setState({
+          users: upsertById(state.users, userRow),
+          transactions: upsertById(state.transactions, mapTransaction(txnRow)),
+        });
+      }
+    }
+  }
+
+  // Hole cards live in a locked-down table (see 0026_poker.sql) — clear any
+  // leftovers, then seed fresh ones for this hand.
+  const eligibleIds = eligible.map((s) => s.id);
+  await client.from("poker_hole_cards").delete().in("seat_id", eligibleIds);
+  await client
+    .from("poker_hole_cards")
+    .insert(eligible.map((seat) => ({ seat_id: seat.id, cards: holeCardsBySeat.get(seat.id) })));
+
+  const { data: tableRow, error: tableErr } = await client
+    .from("poker_table")
+    .update({
+      status: "preflop",
+      button_seat_index: buttonSeat.seatIndex,
+      current_seat_index: firstToAct.seatIndex,
+      turn_ends_at: new Date(Date.now() + POKER_TURN_MS).toISOString(),
+      acted_seat_indices: [],
+      current_bet: bbAmount,
+      min_raise: bbAmount,
+      hand_cap: handCap,
+      pot: sbAmount + bbAmount,
+      community_cards: [],
+      deck,
+      hand_number: table.handNumber + 1,
+      resolved_at: null,
+    })
+    .eq("id", table.id)
+    .select()
+    .maybeSingle();
+  if (!tableErr && tableRow) setState({ pokerTable: mapPokerTable(tableRow) });
+  await pollPokerTable();
+}
+
+export async function foldPokerSeat(seatId: string): Promise<void> {
+  const table = state.pokerTable;
+  const seat = state.pokerTableSeats.find((s) => s.id === seatId);
+  if (!table || !seat) throw new Error("Seat not found");
+  if (table.currentSeatIndex !== seat.seatIndex) throw new Error("Not your turn");
+  if (seat.status !== "active") throw new Error("You're not in this hand");
+
+  const client = requireClient();
+  const { data, error } = await client
+    .from("poker_table_seats")
+    .update({ status: "folded", last_action: "fold" })
+    .eq("id", seatId)
+    .eq("status", "active")
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("This hand has already moved on");
+  setState({ pokerTableSeats: upsertById(state.pokerTableSeats, mapPokerTableSeat(data)) });
+
+  await advancePokerAction(table.id, seat.seatIndex, false);
+}
+
+export async function checkOrCallPokerSeat(seatId: string): Promise<void> {
+  const table = state.pokerTable;
+  const seat = state.pokerTableSeats.find((s) => s.id === seatId);
+  if (!table || !seat) throw new Error("Seat not found");
+  if (table.currentSeatIndex !== seat.seatIndex) throw new Error("Not your turn");
+  if (seat.status !== "active") throw new Error("You're not in this hand");
+
+  const callAmount = Math.min(pokerCallAmount(table, seat), pokerMaxAdditional(table, seat));
+  const newStreetCommitted = seat.streetCommitted + callAmount;
+  const newHandCommitted = seat.handCommitted + callAmount;
+  const isAllIn = table.handCap !== null && newHandCommitted >= table.handCap - 1e-9;
+
+  const client = requireClient();
+  const { data, error } = await client
+    .from("poker_table_seats")
+    .update({
+      street_committed: newStreetCommitted,
+      hand_committed: newHandCommitted,
+      status: isAllIn ? "all_in" : "active",
+      last_action: isAllIn ? "all_in" : callAmount > 0 ? "call" : "check",
+    })
+    .eq("id", seatId)
+    .eq("status", "active")
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("This hand has already moved on");
+  setState({ pokerTableSeats: upsertById(state.pokerTableSeats, mapPokerTableSeat(data)) });
+
+  if (callAmount > 0) {
+    const { data: txnRow, error: txnErr } = await client
+      .from("transactions")
+      .insert({ user_id: seat.userId, type: "poker", amount: -callAmount })
+      .select()
+      .single();
+    if (!txnErr) {
+      const userRow = await adjustBalance(seat.userId, -callAmount);
+      setState({
+        users: upsertById(state.users, userRow),
+        transactions: upsertById(state.transactions, mapTransaction(txnRow)),
+      });
+    }
+    const { data: tableRow } = await client
+      .from("poker_table")
+      .update({ pot: table.pot + callAmount })
+      .eq("id", table.id)
+      .select()
+      .maybeSingle();
+    if (tableRow) setState({ pokerTable: mapPokerTable(tableRow) });
+  }
+
+  await advancePokerAction(table.id, seat.seatIndex, false);
+}
+
+export async function raisePokerSeat(seatId: string, raiseToAmount: number): Promise<void> {
+  const table = state.pokerTable;
+  const seat = state.pokerTableSeats.find((s) => s.id === seatId);
+  if (!table || !seat) throw new Error("Seat not found");
+  if (table.currentSeatIndex !== seat.seatIndex) throw new Error("Not your turn");
+  if (seat.status !== "active") throw new Error("You're not in this hand");
+
+  const maxAdditional = pokerMaxAdditional(table, seat);
+  if (maxAdditional <= 0) throw new Error("You're already all-in");
+  const maxStreetCommitted = seat.streetCommitted + maxAdditional;
+  const minLegalRaiseTo = table.currentBet + table.minRaise;
+
+  const target = Math.min(raiseToAmount, maxStreetCommitted);
+  if (!Number.isFinite(target) || target <= seat.streetCommitted || target <= table.currentBet) {
+    throw new Error("Raise must be more than the current bet");
+  }
+  if (target < minLegalRaiseTo && target < maxStreetCommitted) {
+    throw new Error(`Raise to at least ${minLegalRaiseTo}`);
+  }
+
+  const additional = target - seat.streetCommitted;
+  const newHandCommitted = seat.handCommitted + additional;
+  const isAllIn = target >= maxStreetCommitted - 1e-9;
+  const raiseIncrement = target - table.currentBet;
+
+  const client = requireClient();
+  const { data, error } = await client
+    .from("poker_table_seats")
+    .update({
+      street_committed: target,
+      hand_committed: newHandCommitted,
+      status: isAllIn ? "all_in" : "active",
+      last_action: isAllIn ? "all_in" : "raise",
+    })
+    .eq("id", seatId)
+    .eq("status", "active")
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("This hand has already moved on");
+  setState({ pokerTableSeats: upsertById(state.pokerTableSeats, mapPokerTableSeat(data)) });
+
+  const { data: txnRow, error: txnErr } = await client
+    .from("transactions")
+    .insert({ user_id: seat.userId, type: "poker", amount: -additional })
+    .select()
+    .single();
+  if (!txnErr) {
+    const userRow = await adjustBalance(seat.userId, -additional);
+    setState({
+      users: upsertById(state.users, userRow),
+      transactions: upsertById(state.transactions, mapTransaction(txnRow)),
+    });
+  }
+
+  const { data: tableRow } = await client
+    .from("poker_table")
+    .update({ pot: table.pot + additional, current_bet: target, min_raise: Math.max(table.minRaise, raiseIncrement) })
+    .eq("id", table.id)
+    .select()
+    .maybeSingle();
+  if (tableRow) setState({ pokerTable: mapPokerTable(tableRow) });
+
+  await advancePokerAction(table.id, seat.seatIndex, true);
+}
+
+// Advances turn order after an action, closing the betting round (dealing
+// the next street) once every still-active seat has matched the current
+// bet (or is all-in) since the last raise. `wasAggression` resets who
+// still needs to respond; everything else just needs to catch up.
+async function advancePokerAction(tableId: string, actingSeatIndex: number, wasAggression: boolean): Promise<void> {
+  const inHand = pokerInHandSeats(tableId);
+  if (inHand.length <= 1) {
+    await awardPokerPotUncontested(tableId, inHand[0] ?? null);
+    return;
+  }
+
+  const table = state.pokerTable;
+  if (!table || table.id !== tableId) return;
+
+  const acting = pokerActingSeats(tableId);
+  const actedSeatIndices = wasAggression ? [actingSeatIndex] : [...table.actedSeatIndices, actingSeatIndex];
+  const allCaughtUp = acting.every((s) => actedSeatIndices.includes(s.seatIndex));
+
+  if (acting.length === 0 || allCaughtUp) {
+    // Persist the closing action's acted-set before moving streets, so a
+    // racing duplicate call sees a consistent picture either way.
+    await advancePokerStreet(tableId);
+    return;
+  }
+
+  const nextSeat = nextEligibleSeatAfter(acting, actingSeatIndex);
+  const client = requireClient();
+  const { data, error } = await client
+    .from("poker_table")
+    .update({
+      current_seat_index: nextSeat.seatIndex,
+      turn_ends_at: new Date(Date.now() + POKER_TURN_MS).toISOString(),
+      acted_seat_indices: actedSeatIndices,
+    })
+    .eq("id", tableId)
+    .eq("current_seat_index", actingSeatIndex)
+    .select()
+    .maybeSingle();
+  if (!error && data) setState({ pokerTable: mapPokerTable(data) });
+}
+
+const POKER_NEXT_STREET: Record<string, string> = {
+  preflop: "flop",
+  flop: "turn",
+  turn: "river",
+  river: "showdown",
+};
+
+async function advancePokerStreet(tableId: string): Promise<void> {
+  const table = state.pokerTable;
+  if (!table || table.id !== tableId) return;
+  const target = POKER_NEXT_STREET[table.status];
+  if (!target) return;
+
+  if (target === "showdown") {
+    await resolvePokerShowdown(tableId);
+    return;
+  }
+
+  const client = requireClient();
+  const dealCount = table.status === "preflop" ? 3 : 1;
+  const deck = [...table.deck];
+  const dealt = deck.splice(0, dealCount);
+  const newCommunity = [...table.communityCards, ...dealt];
+
+  const inHand = pokerInHandSeats(tableId);
+  await Promise.all(
+    inHand.map((s) =>
+      client.from("poker_table_seats").update({ street_committed: 0, last_action: null }).eq("id", s.id),
+    ),
+  );
+
+  const acting = inHand.filter((s) => s.status === "active");
+  const buttonSeatIndex = table.buttonSeatIndex ?? 0;
+  const firstToAct = acting.length > 0 ? nextEligibleSeatAfter(acting, buttonSeatIndex) : null;
+
+  const { data: tableRow, error } = await client
+    .from("poker_table")
+    .update({
+      status: target,
+      community_cards: newCommunity,
+      deck,
+      current_bet: 0,
+      min_raise: POKER_BIG_BLIND,
+      acted_seat_indices: [],
+      current_seat_index: firstToAct?.seatIndex ?? null,
+      turn_ends_at: firstToAct ? new Date(Date.now() + POKER_TURN_MS).toISOString() : null,
+    })
+    .eq("id", tableId)
+    .eq("status", table.status)
+    .select()
+    .maybeSingle();
+  if (error || !tableRow) return;
+  setState({ pokerTable: mapPokerTable(tableRow) });
+  await pollPokerTable();
+
+  if (acting.length === 0) {
+    // Everyone remaining is all-in — no one left to bet, run out the board.
+    await advancePokerStreet(tableId);
+  }
+}
+
+// Plays out the showdown: reveals every still-in hand (folded players'
+// cards are never touched — reveal_showdown_hole_cards only returns
+// active/all_in seats), evaluates each against the board, and splits the
+// pot evenly among whoever has the best 5-card hand.
+async function resolvePokerShowdown(tableId: string): Promise<void> {
+  const client = requireClient();
+  const { data: claimedRow, error: claimErr } = await client
+    .from("poker_table")
+    .update({ status: "showdown" })
+    .eq("id", tableId)
+    .eq("status", "river")
+    .select()
+    .maybeSingle();
+  if (claimErr || !claimedRow) return;
+  const table = mapPokerTable(claimedRow);
+  setState({ pokerTable: table });
+
+  const inHand = pokerInHandSeats(tableId);
+  const { data: revealed, error: revealErr } = await client.rpc("reveal_showdown_hole_cards", {
+    p_table_id: tableId,
+  });
+  if (revealErr || !revealed) return;
+
+  const cardsBySeat = new Map<string, PlayingCard[]>();
+  for (const row of revealed as { seat_id: string; cards: PlayingCard[] }[]) cardsBySeat.set(row.seat_id, row.cards);
+
+  const evaluated = inHand.map((seat) => {
+    const hole = cardsBySeat.get(seat.id) ?? [];
+    return { seat, hole, best: evaluateBestHand([...hole, ...table.communityCards]) };
+  });
+
+  let winners = evaluated.slice(0, 1);
+  for (const e of evaluated.slice(1)) {
+    const cmp = compareHands(e.best, winners[0].best);
+    if (cmp > 0) winners = [e];
+    else if (cmp === 0) winners.push(e);
+  }
+
+  const share = table.pot / winners.length;
+  for (const e of evaluated) {
+    const isWinner = winners.some((w) => w.seat.id === e.seat.id);
+    const resultAmount = isWinner ? share - e.seat.handCommitted : -e.seat.handCommitted;
+    await client
+      .from("poker_table_seats")
+      .update({
+        result: isWinner ? (winners.length > 1 ? "split" : "won") : "lost",
+        result_amount: resultAmount,
+        revealed_hole_cards: e.hole,
+      })
+      .eq("id", e.seat.id);
+  }
+
+  for (const w of winners) {
+    const { data: txnRow, error: txnErr } = await client
+      .from("transactions")
+      .insert({ user_id: w.seat.userId, type: "poker", amount: share })
+      .select()
+      .single();
+    if (!txnErr) {
+      const userRow = await adjustBalance(w.seat.userId, share);
+      setState({
+        users: upsertById(state.users, userRow),
+        transactions: upsertById(state.transactions, mapTransaction(txnRow)),
+      });
+    }
+  }
+
+  const { data: finalRow } = await client
+    .from("poker_table")
+    .update({ status: "hand_over", resolved_at: new Date().toISOString(), current_seat_index: null, turn_ends_at: null })
+    .eq("id", tableId)
+    .select()
+    .maybeSingle();
+  if (finalRow) setState({ pokerTable: mapPokerTable(finalRow) });
+  await pollPokerTable();
+}
+
+// Everyone else folded — award the pot without a showdown (folded hands
+// are never revealed, matching normal poker etiquette).
+async function awardPokerPotUncontested(tableId: string, winnerSeat: PokerTableSeat | null): Promise<void> {
+  const table = state.pokerTable;
+  if (!table || table.id !== tableId) return;
+  if (table.status === "hand_over" || table.status === "waiting") return;
+
+  const client = requireClient();
+  const { data: claimedRow, error: claimErr } = await client
+    .from("poker_table")
+    .update({ status: "hand_over", resolved_at: new Date().toISOString(), current_seat_index: null, turn_ends_at: null })
+    .eq("id", tableId)
+    .eq("status", table.status)
+    .select()
+    .maybeSingle();
+  if (claimErr || !claimedRow) return;
+  setState({ pokerTable: mapPokerTable(claimedRow) });
+
+  const folded = pokerSeatsForTable(tableId).filter((s) => s.status === "folded");
+  for (const s of folded) {
+    await client.from("poker_table_seats").update({ result: "folded", result_amount: -s.handCommitted }).eq("id", s.id);
+  }
+
+  if (winnerSeat) {
+    await client
+      .from("poker_table_seats")
+      .update({ result: "won", result_amount: table.pot - winnerSeat.handCommitted })
+      .eq("id", winnerSeat.id);
+
+    const { data: txnRow, error: txnErr } = await client
+      .from("transactions")
+      .insert({ user_id: winnerSeat.userId, type: "poker", amount: table.pot })
+      .select()
+      .single();
+    if (!txnErr) {
+      const userRow = await adjustBalance(winnerSeat.userId, table.pot);
+      setState({
+        users: upsertById(state.users, userRow),
+        transactions: upsertById(state.transactions, mapTransaction(txnRow)),
+      });
+    }
+  }
+
+  await pollPokerTable();
+}
+
+// If the seat the table thinks is "current" has already settled some
+// other way (a race between two advance calls), nudge the turn forward
+// instead of waiting on it forever — same idea as Blackjack Table's.
+export async function nudgePokerTableIfStale(table: PokerTable): Promise<void> {
+  if (!["preflop", "flop", "turn", "river"].includes(table.status)) return;
+  if (table.currentSeatIndex === null) return;
+  const seat = state.pokerTableSeats.find((s) => s.tableId === table.id && s.seatIndex === table.currentSeatIndex);
+  if (seat && seat.status === "active") return;
+  await advancePokerAction(table.id, table.currentSeatIndex, false);
+}
+
+// Force-folds (or auto-checks if that's free) once the turn timer runs
+// out. Racing a real action harmlessly loses — the .eq("status", "active")
+// filter no-ops it.
+export async function autoFoldPokerSeatIfDue(table: PokerTable): Promise<void> {
+  if (!["preflop", "flop", "turn", "river"].includes(table.status)) return;
+  if (table.currentSeatIndex === null || !table.turnEndsAt) return;
+  if (Date.now() < new Date(table.turnEndsAt).getTime()) return;
+  const seat = state.pokerTableSeats.find((s) => s.tableId === table.id && s.seatIndex === table.currentSeatIndex);
+  if (!seat || seat.status !== "active") return;
+  if (pokerCallAmount(table, seat) <= 0) {
+    await checkOrCallPokerSeat(seat.id);
+  } else {
+    await foldPokerSeat(seat.id);
+  }
+}
+
+// Called once the pause after a hand ends elapses — resets every seat
+// (still-seated players don't need to rejoin) and reopens for the next
+// hand, which starts on the very next tick if 2+ eligible players remain.
+export async function ensureNextPokerHand(table: PokerTable): Promise<void> {
+  if (table.status !== "hand_over") return;
+  const client = requireClient();
+
+  const tableSeats = pokerSeatsForTable(table.id);
+  await client.from("poker_hole_cards").delete().in("seat_id", tableSeats.map((s) => s.id));
+
+  const { data: seatRows, error: seatsErr } = await client
+    .from("poker_table_seats")
+    .update({
+      status: "seated",
+      hand_committed: 0,
+      street_committed: 0,
+      last_action: null,
+      result: null,
+      result_amount: null,
+      revealed_hole_cards: null,
+    })
+    .eq("table_id", table.id)
+    .select();
+  if (!seatsErr && seatRows) {
+    let seats = state.pokerTableSeats;
+    for (const row of seatRows) seats = upsertById(seats, mapPokerTableSeat(row));
+    setState({ pokerTableSeats: seats });
+  }
+
+  const { data: tableRow, error } = await client
+    .from("poker_table")
+    .update({ status: "waiting", community_cards: [], deck: null, pot: 0, current_bet: 0, hand_cap: null })
+    .eq("id", table.id)
+    .eq("status", "hand_over")
+    .select()
+    .maybeSingle();
+  if (!error && tableRow) setState({ pokerTable: mapPokerTable(tableRow) });
 }

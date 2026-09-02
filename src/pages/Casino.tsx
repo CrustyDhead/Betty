@@ -25,6 +25,12 @@ const GAMES = [
     title: "Blackjack Table",
     description: "Sit at a shared table — up to 5 players, one dealer, turns in order.",
   },
+  {
+    to: "/casino/poker",
+    emoji: "♠️",
+    title: "Poker",
+    description: "Texas Hold'em, up to 6 players. No side pots — every hand caps at the smallest stack in.",
+  },
 ];
 
 export function Casino() {
