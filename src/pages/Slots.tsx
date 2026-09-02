@@ -124,17 +124,23 @@ export function Slots() {
           ))}
         </div>
 
-        {lastPayout && (
-          <p
-            className={`mt-4 font-display text-sm font-semibold ${
-              lastPayout.payout > 0 ? "text-(--color-yes-text)" : "text-(--color-no-text)"
-            }`}
-          >
-            {lastPayout.payout > 0
-              ? `You won ${Math.round(lastPayout.payout - lastPayout.amount)} tokens! 🎉`
-              : `Lost ${lastPayout.amount} tokens.`}
-          </p>
-        )}
+        {lastPayout &&
+          (() => {
+            const net = lastPayout.payout - lastPayout.amount;
+            return (
+              <p
+                className={`mt-4 font-display text-sm font-semibold ${
+                  net > 0 ? "text-(--color-yes-text)" : net < 0 ? "text-(--color-no-text)" : "text-(--color-ink-soft)"
+                }`}
+              >
+                {net > 0
+                  ? `You won ${Math.round(net)} tokens! 🎉`
+                  : net < 0
+                    ? `Lost ${Math.round(lastPayout.amount)} tokens.`
+                    : "Push — stake back."}
+              </p>
+            );
+          })()}
 
         {error && (
           <p className="mt-4 rounded-xl bg-(--color-no-soft) px-4 py-3 text-sm text-(--color-no-text)">{error}</p>
