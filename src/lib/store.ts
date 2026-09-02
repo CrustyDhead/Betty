@@ -2207,15 +2207,6 @@ async function fetchFreshPokerSeats(tableId: string): Promise<PokerTableSeat[]> 
   return fresh;
 }
 
-// Seated (between-hand) players with enough balance to post the big blind.
-function pokerEligibleSeats(tableId: string): PokerTableSeat[] {
-  return pokerSeatsForTable(tableId).filter((s) => {
-    if (s.status !== "seated") return false;
-    const user = state.users.find((u) => u.id === s.userId);
-    return !!user && user.tokenBalance >= POKER_BIG_BLIND;
-  });
-}
-
 // Next seat strictly after `seatIndex` in a sorted, already-filtered seat
 // list, wrapping around — used for button/blind rotation and turn order
 // alike, so "who's next" is always one rule applied to whichever subset of
@@ -2283,7 +2274,18 @@ export async function fetchMyHoleCards(seatId: string, userId: string): Promise<
 
 export async function startPokerHandIfDue(table: PokerTable): Promise<void> {
   if (table.status !== "waiting") return;
-  const eligible = pokerEligibleSeats(table.id);
+  // Fresh, not cached — the eligible list feeds a single batch insert of
+  // everyone's hole cards (see startPokerHand). If even one seat in it had
+  // gone stale (left, or reset by a race) between the last poll and now,
+  // that one bad row's FK violation fails the *entire* batch insert, so
+  // everyone dealt into the hand silently ends up with no hole cards at
+  // all — not just the stale seat's owner.
+  const freshSeats = await fetchFreshPokerSeats(table.id);
+  const eligible = freshSeats.filter((s) => {
+    if (s.status !== "seated") return false;
+    const user = state.users.find((u) => u.id === s.userId);
+    return !!user && user.tokenBalance >= POKER_BIG_BLIND;
+  });
   if (eligible.length < 2) return;
   await startPokerHand(table, eligible);
 }
@@ -2363,12 +2365,26 @@ async function startPokerHand(table: PokerTable, eligible: PokerTableSeat[]): Pr
   }
 
   // Hole cards live in a locked-down table (see 0026_poker.sql) — clear any
-  // leftovers, then seed fresh ones for this hand.
+  // leftovers, then seed fresh ones for this hand. This is a single batch
+  // insert: if any one seat_id in it doesn't actually exist (a stale
+  // reference), the whole insert fails on that row's FK violation and
+  // *everyone* dealt into the hand silently ends up with no cards, not
+  // just the stale one — so on a failure, drop whichever seat_ids don't
+  // verifiably exist right now and retry once with the rest, rather than
+  // leaving every real player in the hand with nothing.
   const eligibleIds = eligible.map((s) => s.id);
   await client.from("poker_hole_cards").delete().in("seat_id", eligibleIds);
-  await client
+  const { error: holeCardsErr } = await client
     .from("poker_hole_cards")
     .insert(eligible.map((seat) => ({ seat_id: seat.id, cards: holeCardsBySeat.get(seat.id) })));
+  if (holeCardsErr) {
+    const { data: stillValidSeats } = await client.from("poker_table_seats").select("id").in("id", eligibleIds);
+    const validIds = new Set((stillValidSeats ?? []).map((s) => s.id as string));
+    const retryRows = eligible
+      .filter((seat) => validIds.has(seat.id))
+      .map((seat) => ({ seat_id: seat.id, cards: holeCardsBySeat.get(seat.id) }));
+    if (retryRows.length > 0) await client.from("poker_hole_cards").insert(retryRows);
+  }
 
   const { data: tableRow, error: tableErr } = await client
     .from("poker_table")
