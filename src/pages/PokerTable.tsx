@@ -154,8 +154,17 @@ export function PokerTable() {
     }
     if (myHoleCardsHand === table.handNumber) return;
     fetchMyHoleCards(mySeat.id, user.id).then((cards) => {
-      setMyHoleCards(cards);
-      setMyHoleCardsHand(table.handNumber);
+      // Only mark this hand "fetched" on a real result — a null here is
+      // more likely a transient race (this RPC firing before the dealing
+      // sequence's insert lands) than "you truly have no cards", and
+      // caching that null would permanently block ever retrying for the
+      // rest of the hand. Leaving myHoleCardsHand unset lets the effect
+      // try again on the next render (every poll tick creates a fresh
+      // `table` object, so this reliably retries within ~1.5s).
+      if (cards) {
+        setMyHoleCards(cards);
+        setMyHoleCardsHand(table.handNumber);
+      }
     });
   }, [user, mySeat, table, myHoleCards, myHoleCardsHand]);
 

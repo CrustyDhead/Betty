@@ -23,9 +23,17 @@ async function checkForNewVersion(runningSrc: string) {
     const res = await fetch("/", { cache: "no-store" });
     const html = await res.text();
     const latestSrc = html.match(BUNDLE_SRC_PATTERN)?.[1];
-    if (latestSrc && latestSrc !== runningSrc) {
-      window.location.reload();
-    }
+    if (!latestSrc || latestSrc === runningSrc) return;
+
+    // Don't yank someone out of a live poker/blackjack hand — a reload
+    // doesn't run any of the app's own leave/fold logic, it just drops the
+    // tab, which reads as the app randomly kicking them and folding them.
+    // Deferring here just means this check's normal cadence (every 5min,
+    // or on refocus) tries again later, once they're between hands.
+    const { isPlayerMidHand } = await import("./store");
+    if (isPlayerMidHand()) return;
+
+    window.location.reload();
   } catch {
     // network hiccup — just try again next interval
   }

@@ -2855,3 +2855,20 @@ export async function ensureNextPokerHand(table: PokerTable): Promise<void> {
     .maybeSingle();
   if (!error && tableRow) setState({ pokerTable: mapPokerTable(tableRow) });
 }
+
+// Used by versionCheck.ts to defer its auto-reload — forcing a reload mid
+// hand (which happens on every deploy) reads to the player as the app
+// randomly kicking them out and folding them, since a reload doesn't run
+// any of the app's own leave/fold logic, it just drops the tab and
+// reconnects fresh once the timer expires or someone else nudges the hand
+// forward. Safe to check un-authenticated (returns false) since
+// versionCheck runs for every visitor, logged in or not.
+export function isPlayerMidHand(): boolean {
+  const userId = getCurrentUserId();
+  if (!userId) return false;
+  const bjSeat = mySeatAtBlackjackTable(userId);
+  if (bjSeat && bjSeat.status !== "seated" && bjSeat.status !== "resolved") return true;
+  const pokerSeat = mySeatAtPokerTable(userId);
+  if (pokerSeat && pokerSeat.status !== "seated") return true;
+  return false;
+}
